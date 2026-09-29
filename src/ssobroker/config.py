@@ -13,6 +13,8 @@ from pathlib import Path
 
 import yaml
 
+from .paths import home_dir
+
 
 class ConfigError(RuntimeError):
     pass
@@ -39,7 +41,7 @@ class OrgConfig:
 
 
 def default_config_path() -> Path:
-    return Path(os.environ.get("ORGCTL_CONFIG", Path.home() / ".orgctl" / "orgs.yaml"))
+    return Path(os.environ.get("SSOBROKER_CONFIG", home_dir() / "orgs.yaml"))
 
 
 def load(path: Path | None = None) -> OrgConfig:
@@ -47,7 +49,7 @@ def load(path: Path | None = None) -> OrgConfig:
     if not path.exists():
         raise ConfigError(
             f"No config found at {path}.\n"
-            f"Run `orgctl init` to create one from the example, or copy "
+            f"Run `ssobroker init` to create one from the example, or copy "
             f"config/orgs.example.yaml there and edit it."
         )
     raw = yaml.safe_load(path.read_text()) or {}

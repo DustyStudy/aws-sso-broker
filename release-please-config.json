@@ -1,8 +1,9 @@
 {
+  "bootstrap-sha": "2b3936cddc6bf6b46f23f7aedc68f1bbcf6e83e7",
   "packages": {
     ".": {
       "release-type": "python",
-      "package-name": "orgctl",
+      "package-name": "aws-sso-broker",
       "changelog-path": "CHANGELOG.md",
       "bump-minor-pre-major": true,
       "bump-patch-for-minor-pre-major": true

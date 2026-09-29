@@ -1,6 +1,6 @@
 import pytest
 
-from orgctl import guardrails
+from ssobroker import guardrails
 
 
 def test_protected_account_blocks_everything():

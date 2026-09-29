@@ -6,7 +6,7 @@ import time
 import pytest
 from botocore.exceptions import ClientError
 
-from orgctl import cache, sso
+from ssobroker import cache, sso
 
 START_URL = "https://example.awsapps.com/start"
 REGION = "us-east-1"
@@ -43,14 +43,14 @@ class _FakeSsoClient:
 
 
 def _token(tmp_path, monkeypatch) -> sso.SsoToken:
-    monkeypatch.setenv("ORGCTL_HOME", str(tmp_path))
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
     return sso.SsoToken(
         access_token="tok", expires_at=time.time() + 3600, region=REGION, start_url=START_URL
     )
 
 
 def _key_in_subprocess(hash_seed: str) -> str:
-    code = f"from orgctl import sso; print(sso._token_cache_key({START_URL!r}, {REGION!r}))"
+    code = f"from ssobroker import sso; print(sso._token_cache_key({START_URL!r}, {REGION!r}))"
     env = {**os.environ, "PYTHONHASHSEED": hash_seed}
     out = subprocess.run(
         [sys.executable, "-c", code], env=env, capture_output=True, text=True, check=True
@@ -78,7 +78,7 @@ def test_token_cache_key_is_filename_safe():
 
 
 def test_login_reuses_cached_token_without_calling_aws(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORGCTL_HOME", str(tmp_path))
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
     now = time.time()
     cache.put(
         sso._token_cache_key(START_URL, REGION),
@@ -95,7 +95,7 @@ def test_login_reuses_cached_token_without_calling_aws(tmp_path, monkeypatch):
 
 
 def test_login_ignores_cached_token_older_than_max_session(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORGCTL_HOME", str(tmp_path))
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
     now = time.time()
     key = sso._token_cache_key(START_URL, REGION)
     cache.put(
@@ -120,7 +120,7 @@ def test_login_ignores_cached_token_older_than_max_session(tmp_path, monkeypatch
 def test_get_role_credentials_clears_token_and_raises_clean_error(tmp_path, monkeypatch, code):
     # Regression: a revoked/expired SSO token made get_role_credentials raise
     # a raw botocore ClientError, and the (now-useless) cached token was never
-    # cleared, so the caller was stuck until they knew to run `orgctl logout`.
+    # cleared, so the caller was stuck until they knew to run `ssobroker logout`.
     token = _token(tmp_path, monkeypatch)
     cache.put(
         sso._token_cache_key(START_URL, REGION),

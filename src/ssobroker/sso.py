@@ -24,7 +24,7 @@ from botocore.exceptions import ClientError
 
 from . import cache
 
-CLIENT_NAME = "orgctl"
+CLIENT_NAME = "ssobroker"
 CLIENT_TYPE = "public"
 
 # Default cap on how long a cached SSO token is trusted, independent of its
@@ -42,7 +42,7 @@ class SsoTokenExpiredError(SsoLoginError):
     """The cached SSO access token was rejected by AWS — expired, or revoked
     server-side (e.g. by an admin) independent of our own local expiry
     tracking. The cached token has already been cleared by the time this is
-    raised; the caller just needs to run `orgctl login` again."""
+    raised; the caller just needs to run `ssobroker login` again."""
 
 
 # AWS SSO's error codes for "this access token is no longer good" — as
@@ -170,7 +170,7 @@ def _invalidate_if_token_rejected(sso_token: SsoToken, e: ClientError) -> None:
         raise SsoTokenExpiredError(
             "Your cached SSO session was rejected by AWS (it may have expired "
             "or been revoked). The cached token has been cleared — run "
-            "`orgctl login` again."
+            "`ssobroker login` again."
         ) from e
     raise
 

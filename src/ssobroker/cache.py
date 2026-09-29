@@ -5,12 +5,12 @@ for hours) are stored in the OS keychain via the optional `keyring` package
 when it's installed and a working backend is available (macOS Keychain,
 Windows Credential Manager, Secret Service/KWallet on Linux). Everything
 else, and the token fallback when no keychain is available, lives under
-~/.orgctl/cache as 0600 files. Nothing here is ever transmitted anywhere
+~/.ssobroker/cache as 0600 files. Nothing here is ever transmitted anywhere
 except back to AWS SSO/STS endpoints. Every read checks expiry before
 handing anything back.
 
 Install the `keyring` extra to enable OS-keychain storage:
-    pip install "orgctl[keyring]"
+    pip install "aws-sso-broker[keyring]"
 """
 
 from __future__ import annotations
@@ -21,7 +21,9 @@ import stat
 import time
 from pathlib import Path
 
-KEYRING_SERVICE = "orgctl"
+from .paths import home_dir
+
+KEYRING_SERVICE = "ssobroker"
 # Only SSO tokens go through the OS keychain — role credentials are already
 # short-lived (~1h) and scoped per account/role, so the extra indirection
 # isn't worth it for them.
@@ -47,7 +49,7 @@ def _keyring_module():
 
 
 def cache_dir() -> Path:
-    base = Path(os.environ.get("ORGCTL_HOME", Path.home() / ".orgctl"))
+    base = home_dir()
     d = base / "cache"
     d.mkdir(parents=True, exist_ok=True)
     _lock_down(base)

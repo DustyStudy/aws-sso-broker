@@ -12,8 +12,8 @@ import json
 
 import pytest
 
-from orgctl import exec_cmd, guardrails
-from orgctl.config import Account, OrgConfig
+from ssobroker import exec_cmd, guardrails
+from ssobroker.config import Account, OrgConfig
 
 FAKE_CREDS = {
     "AccessKeyId": "AKIAFAKE",
@@ -38,8 +38,8 @@ def cfg():
 
 @pytest.fixture(autouse=True)
 def _home(tmp_path, monkeypatch):
-    # Route the audit log to a temp dir instead of the real ~/.orgctl.
-    monkeypatch.setenv("ORGCTL_HOME", str(tmp_path))
+    # Route the audit log to a temp dir instead of the real ~/.ssobroker.
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
     return tmp_path
 
 
@@ -245,7 +245,7 @@ def test_policy_precheck_warns_but_does_not_block_on_denial(
     """check_action is advisory-only per the module's own docstring — a
     predicted deny must print a warning but still let the real command run.
     """
-    from orgctl import policy_check
+    from ssobroker import policy_check
 
     monkeypatch.setattr(
         policy_check,
@@ -283,7 +283,7 @@ def test_policy_precheck_warns_but_does_not_block_on_denial(
 def test_policy_precheck_failure_warns_but_does_not_crash(
     cfg, fake_get_creds, fake_subprocess, monkeypatch, capsys
 ):
-    from orgctl import policy_check
+    from ssobroker import policy_check
 
     def _boom(creds, region):
         raise RuntimeError("no IAM permission to simulate")
@@ -309,7 +309,7 @@ def test_spawn_shell_blocks_protected_account(
     cfg, fake_get_creds, fake_subprocess, tmp_path, capsys
 ):
     # Regression: guardrails.yaml documents protected_account_ids as
-    # blocking "ANY command via `orgctl exec`/`shell`", but spawn_shell()
+    # blocking "ANY command via `ssobroker exec`/`shell`", but spawn_shell()
     # never called into guardrails at all — there's no single "command" to
     # pattern-match against for an interactive session, but the
     # protected-account list should still apply.

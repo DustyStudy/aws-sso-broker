@@ -10,9 +10,9 @@ import sys
 
 import pytest
 
-from orgctl import exec_cmd
-from orgctl.config import Account, OrgConfig
-from orgctl.sso import SsoToken
+from ssobroker import exec_cmd
+from ssobroker.config import Account, OrgConfig
+from ssobroker.sso import SsoToken
 
 CFG = OrgConfig(
     name="test",
@@ -29,7 +29,7 @@ TOKEN = SsoToken(access_token="tok", expires_at=0, region="us-east-1", start_url
 
 @pytest.fixture(autouse=True)
 def _home(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORGCTL_HOME", str(tmp_path))
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
 
 
 def _fake_creds(monkeypatch, **overrides):

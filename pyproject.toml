@@ -3,9 +3,9 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "orgctl"
+name = "aws-sso-broker"
 version = "0.1.7"
-description = "Ephemeral AWS multi-account credential manager built on IAM Identity Center (SSO) — no long-lived keys, no key exports."
+description = "Ephemeral AWS multi-account credential broker built on IAM Identity Center (SSO) — no long-lived keys, no key exports."
 readme = "README.md"
 requires-python = ">=3.11"
 license = { text = "MIT" }
@@ -47,13 +47,13 @@ keyring = [
 ]
 
 [project.scripts]
-orgctl = "orgctl.cli:main"
+ssobroker = "ssobroker.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-orgctl = ["py.typed", "examples/*.yaml"]
+ssobroker = ["py.typed", "examples/*.yaml"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
@@ -68,7 +68,7 @@ ignore = ["E501"]  # line length handled by formatter, not the linter
 
 [tool.mypy]
 python_version = "3.11"
-packages = ["orgctl"]
+packages = ["ssobroker"]
 mypy_path = "src"
 explicit_package_bases = true
 ignore_missing_imports = true

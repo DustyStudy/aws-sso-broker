@@ -4,7 +4,7 @@ account (and optionally every role) in the local orgs.yaml registry.
 The file is edited as text, not parsed and re-serialized: anything this tool
 didn't write — other profiles, comments, blank lines, key casing, line
 endings — is preserved byte-for-byte. Every section this tool writes carries
-a per-section marker key (`_orgctl_managed`). On a re-run, a section is only
+a per-section marker key (`_ssobroker_managed`). On a re-run, a section is only
 ever overwritten if that marker is already present; if a profile name
 collides with a section that exists but wasn't created by this tool, it's
 left alone and reported back as a conflict instead of being silently mutated.
@@ -23,11 +23,14 @@ from .config import Account, ConfigError, OrgConfig
 # Written into every section this tool creates so a later run can tell
 # "I made this, safe to overwrite" apart from "this collides with a
 # profile the user already had".
-_MANAGED_KEY = "_orgctl_managed"
+_MANAGED_KEY = "_ssobroker_managed"
+# Marker written before the tool was renamed from orgctl. Sections carrying
+# it are still treated as ours, and get rewritten with the new marker.
+_LEGACY_MANAGED_KEY = "_orgctl_managed"
 
 # AWS config headers start in column 0; an indented "[x]" is a continuation line.
 _SECTION_RE = re.compile(r"^\[([^\]]+)\]")
-_MANAGED_RE = re.compile(rf"^{_MANAGED_KEY}\s*=")
+_MANAGED_RE = re.compile(rf"^(?:{_MANAGED_KEY}|{_LEGACY_MANAGED_KEY})\s*=")
 _BLANK_OR_COMMENT_RE = re.compile(r"^\s*($|[#;])")
 
 
@@ -84,7 +87,7 @@ def _managed_profiles_for(
             owners[name] = owner
             profiles[name] = {
                 "credential_process": (
-                    f"orgctl creds-process --account {account.alias} --role {role}"
+                    f"ssobroker creds-process --account {account.alias} --role {role}"
                 ),
                 "region": cfg.default_region,
             }
@@ -158,8 +161,8 @@ def sync(
 
     A profile name is a "conflict" (and left completely untouched) when a
     section of that name already exists in ~/.aws/config but doesn't carry
-    this tool's managed-section marker — i.e. it predates orgctl or was
-    hand-edited, not something orgctl itself wrote on an earlier run.
+    this tool's managed-section marker — i.e. it predates ssobroker or was
+    hand-edited, not something ssobroker itself wrote on an earlier run.
 
     Nothing is written — and no backup is made — when the file would come out
     identical. When an existing file is changed, it is first copied to a new

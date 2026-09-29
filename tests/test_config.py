@@ -2,7 +2,7 @@ import textwrap
 
 import pytest
 
-from orgctl import config
+from ssobroker import config
 
 
 def write_orgs_yaml(tmp_path, content):
@@ -111,7 +111,7 @@ def test_optional_fields_explicit(tmp_path):
         sso_start_url: https://example.awsapps.com/start
         sso_region: us-east-1
         max_session_hours: 2
-        cloudwatch_log_group: /orgctl/audit
+        cloudwatch_log_group: /ssobroker/audit
         accounts:
           prod:
             account_id: "123456789012"
@@ -120,7 +120,7 @@ def test_optional_fields_explicit(tmp_path):
     )
     cfg = config.load(p)
     assert cfg.max_session_hours == 2.0
-    assert cfg.cloudwatch_log_group == "/orgctl/audit"
+    assert cfg.cloudwatch_log_group == "/ssobroker/audit"
 
 
 def test_accounts_by_tag(tmp_path):

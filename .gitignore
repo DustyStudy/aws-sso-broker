@@ -12,8 +12,8 @@ htmlcov/
 .mypy_cache/
 .ruff_cache/
 
-# orgctl runtime state — never commit cached tokens/credentials/audit logs
-.orgctl/
+# ssobroker runtime state — never commit cached tokens/credentials/audit logs
+.ssobroker/
 orgs.yaml
 guardrails.yaml
 *.local.yaml
