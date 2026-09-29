@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "orgctl"
-version = "0.1.6"
+version = "0.1.7"
 description = "Ephemeral AWS multi-account credential manager built on IAM Identity Center (SSO) — no long-lived keys, no key exports."
 readme = "README.md"
 requires-python = ">=3.11"

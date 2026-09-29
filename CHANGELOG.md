@@ -10,6 +10,13 @@ workflow is active (see `.github/workflows/release-please.yml`) — it opens
 a PR that moves these into a versioned section on each release. Until the
 first tag exists, this file is maintained by hand.
 
+## [0.1.7](https://github.com/DustyStudy/aws-orgctl/compare/orgctl-v0.1.6...orgctl-v0.1.7) (2026-09-29)
+
+
+### Documentation
+
+* **threat-model:** remove link to a repo that is no longer public ([#29](https://github.com/DustyStudy/aws-orgctl/issues/29)) ([e074aa4](https://github.com/DustyStudy/aws-orgctl/commit/e074aa44effc3f5e53bc22add9e08f54f98b3e94))
+
 ## [0.1.6](https://github.com/DustyStudy/aws-orgctl/compare/orgctl-v0.1.5...orgctl-v0.1.6) (2026-09-23)
 
 
