@@ -36,7 +36,7 @@ jobs:
       - name: Install and run ruff + bandit
         if: ${{ hashFiles('**/*.py') != '' }}
         run: |
-          pip install ruff bandit
+          pip install --require-hashes -r requirements/lint.txt
           ruff check .
           bandit -r . -ll --exclude ./.git
 

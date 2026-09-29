@@ -2,10 +2,10 @@
   "note": "Each claim checked against AWS's own response (via a separate `aws sts get-caller-identity` or direct API read), not just orgctl's own reported success. Account IDs masked.",
   "login": "Device-authorization flow completed against the real IAM Identity Center start URL; token cached under ~/.orgctl/cache.",
   "whoami": {
-    "dev": "arn:aws:sts::<dev-account>:assumed-role/AWSReservedSSO_AdministratorAccess_.../darrington",
-    "management": "arn:aws:sts::<management-account>:assumed-role/AWSReservedSSO_AdministratorAccess_.../darrington"
+    "dev": "arn:aws:sts::<dev-account>:assumed-role/AWSReservedSSO_AdministratorAccess_.../<sso-user>",
+    "management": "arn:aws:sts::<management-account>:assumed-role/AWSReservedSSO_AdministratorAccess_.../<sso-user>"
   },
-  "list_remote": "Returned all 3 accounts actually granted via Identity Center, including one (cfb-picks) that was never added to the local orgs.yaml registry - confirms it queries live SSO grants, not just the local config file.",
+  "list_remote": "Returned all 3 accounts actually granted via Identity Center, including one that was never added to the local orgs.yaml registry - confirms it queries live SSO grants, not just the local config file.",
   "check_policy": {
     "s3:GetObject": "allowed (AdministratorAccess matches)",
     "organizations:LeaveOrganization": "allowed (AdministratorAccess's identity-based policy technically permits it)",

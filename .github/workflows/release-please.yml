@@ -8,29 +8,25 @@ concurrency:
   group: release-please-${{ github.ref }}
   cancel-in-progress: false # never cancel a release PR update mid-flight
 
-# release-please needs to open/update PRs and (on merge) create tags/releases,
-# so it genuinely needs write access here — unlike ci.yml. Scoped to exactly
-# the two permissions it documents needing, nothing broader.
 permissions:
-  contents: write
-  pull-requests: write
+  contents: read
 
 jobs:
   release-please:
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    # release-please opens/updates the release PR and, on merge, creates the
+    # tag and GitHub release. Write access is scoped to this job only.
+    permissions:
+      contents: write
+      pull-requests: write
     steps:
       - name: Harden Runner
         uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
         with:
           egress-policy: audit
 
-      # googleapis/release-please-action: official Google Cloud Platform
-      # action, actively maintained with frequent releases — pinned to its
-      # major version tag rather than a SHA, consistent with how this repo
-      # treats other first-party/foundation-maintained actions (see
-      # SECURITY.md for the full pinning rationale).
-      - uses: googleapis/release-please-action@v5
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         with:
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json

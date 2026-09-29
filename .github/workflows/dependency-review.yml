@@ -25,10 +25,7 @@ jobs:
         with:
           persist-credentials: false
 
-      # First-party GitHub action; pinned to major version tag per GitHub's
-      # own documented usage (see SECURITY.md for this repo's pinning
-      # rationale for well-established first-party/foundation actions).
       - name: Dependency Review
-        uses: actions/dependency-review-action@v5
+        uses: actions/dependency-review-action@a1d282b36b6f3519aa1f3fc636f609c47dddb294 # v5.0.0
         with:
           fail-on-severity: high

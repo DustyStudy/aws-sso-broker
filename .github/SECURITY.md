@@ -8,8 +8,8 @@ vulnerability reporting and CI/CD supply-chain hardening specifically.
 ## Reporting a vulnerability
 
 If you find a security issue in `orgctl`, please open a private report via
-GitHub's **Security → Report a vulnerability** on this repo rather than a
-public issue. If that's unavailable, open an issue with minimal detail
+[GitHub private vulnerability reporting](https://github.com/DustyStudy/aws-orgctl/security/advisories/new)
+rather than a public issue. If that's unavailable, open an issue with minimal detail
 asking for a private channel and it'll be picked up from there.
 
 ## Scope
@@ -67,22 +67,14 @@ Every workflow under `.github/workflows/` follows the same baseline:
 - **`concurrency` groups**, so superseded runs on the same ref get
   cancelled instead of piling up.
 
-**Action pinning policy:** actions are pinned to a full commit SHA by
-default (immutable — a tag like `@v4` can be moved by the maintainer, or by
-an attacker who compromises the maintainer's account, without any signal to
-consumers). The exceptions are first-party GitHub actions
-(`actions/dependency-review-action`, `github/codeql-action`) and
-`googleapis/release-please-action`, pinned to major-version tags instead —
-`github/codeql-action`'s own README explicitly recommends *against*
-SHA-pinning it, since some of its features are gated by server-side flags
-tied to the version tag rather than the code itself. Each such exception is
-called out with a comment in the workflow file where it's used.
-`ossf/scorecard-action` is SHA-pinned like the default case — it doesn't
-actually publish a floating major-version tag, only full `vX.Y.Z` tags, so
-tag-pinning it isn't an option regardless of policy.
+**Action pinning policy:** every action, first-party or third-party, is
+pinned to a full commit SHA with the version in a trailing comment. A tag
+like `@v4` can be moved by the maintainer, or by an attacker who
+compromises the maintainer's account, without any signal to consumers; a
+SHA cannot.
 
-Dependabot (`.github/dependabot.yml`) keeps both the SHA-pinned and
-tag-pinned actions current automatically.
+Dependabot (`.github/dependabot.yml`) keeps the pinned SHAs current
+automatically.
 
 ## Supported versions
 
