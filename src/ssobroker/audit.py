@@ -1,6 +1,6 @@
 """Local audit trail.
 
-Every exec/shell invocation appends one JSON line to ~/.orgctl/audit.log.
+Every exec/shell invocation appends one JSON line to ~/.ssobroker/audit.log.
 This is a local record for your own review (e.g. "what did I run against
 prod last Tuesday") — it is never uploaded anywhere by this tool.
 """
@@ -10,17 +10,18 @@ from __future__ import annotations
 import calendar
 import getpass
 import json
-import os
 import socket
 import time
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .paths import home_dir
+
 _TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 
 
 def log_path() -> Path:
-    base = Path(os.environ.get("ORGCTL_HOME", Path.home() / ".orgctl"))
+    base = home_dir()
     base.mkdir(parents=True, exist_ok=True)
     return base / "audit.log"
 
@@ -65,7 +66,7 @@ def push_to_cloudwatch(log_group: str, region: str, n: int = 100) -> int:
     """Push the last `n` local audit-log lines to a CloudWatch Logs group.
 
     Uses whatever credentials are already active in the calling process's
-    environment (e.g. run this inside `orgctl shell` for a low-privilege
+    environment (e.g. run this inside `ssobroker shell` for a low-privilege
     logging role, or export creds for a role that only has logs:PutLogEvents
     / logs:CreateLogStream on this log group). Returns the number of entries
     pushed. Requires boto3 — imported lazily so the rest of this module has

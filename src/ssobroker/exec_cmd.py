@@ -154,7 +154,7 @@ def spawn_shell(
 
     shell = env.get("SHELL", "/bin/bash" if os.name != "nt" else "cmd.exe")
     prompt_tag = f"[{account.alias}:{resolved_role}]"
-    env["ORGCTL_ACTIVE_CONTEXT"] = prompt_tag
+    env["SSOBROKER_ACTIVE_CONTEXT"] = prompt_tag
     if os.name != "nt":
         env.setdefault("PS1", f"{prompt_tag} $ ")
 
@@ -167,7 +167,7 @@ def spawn_shell(
         print(
             "WARNING: these credentials expire soon. A long session may outlive "
             "them — if AWS calls start failing with an expired-token error, exit "
-            "and run `orgctl shell` again to get a fresh set.",
+            "and run `ssobroker shell` again to get a fresh set.",
             file=sys.stderr,
         )
 
@@ -186,7 +186,7 @@ def export_env_lines(
     reason: str | None = None,
 ) -> str:
     """Return shell commands that export credentials for account/role into
-    *the calling shell* — for `eval "$(orgctl export-env -a prod -r admin)"`
+    *the calling shell* — for `eval "$(ssobroker export-env -a prod -r admin)"`
     where spawning a subshell (see spawn_shell) isn't what you want, e.g.
     inside a script or CI step that needs to keep running in the same shell.
     """

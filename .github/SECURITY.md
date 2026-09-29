@@ -7,22 +7,22 @@ vulnerability reporting and CI/CD supply-chain hardening specifically.
 
 ## Reporting a vulnerability
 
-If you find a security issue in `orgctl`, please open a private report via
-[GitHub private vulnerability reporting](https://github.com/DustyStudy/aws-orgctl/security/advisories/new)
+If you find a security issue in `ssobroker`, please open a private report via
+[GitHub private vulnerability reporting](https://github.com/DustyStudy/aws-sso-broker/security/advisories/new)
 rather than a public issue. If that's unavailable, open an issue with minimal detail
 asking for a private channel and it'll be picked up from there.
 
 ## Scope
 
-`orgctl` handles short-lived AWS credentials. Areas that get the most
+`ssobroker` handles short-lived AWS credentials. Areas that get the most
 scrutiny for security review:
 
-- `src/orgctl/sso.py` — the device-authorization flow and token handling
-- `src/orgctl/cache.py` — where tokens and role credentials are persisted
+- `src/ssobroker/sso.py` — the device-authorization flow and token handling
+- `src/ssobroker/cache.py` — where tokens and role credentials are persisted
   (OS keychain when available, 0600 local files otherwise)
-- `src/orgctl/exec_cmd.py` — how credentials are exported into child
+- `src/ssobroker/exec_cmd.py` — how credentials are exported into child
   processes
-- `src/orgctl/guardrails.py` — the local deny/confirm-pattern checks
+- `src/ssobroker/guardrails.py` — the local deny/confirm-pattern checks
 
 ## Design notes relevant to security review
 
@@ -38,9 +38,9 @@ scrutiny for security review:
   belongs in IAM permission boundaries and Service Control Policies. Both
   the code and the README say so; please flag it if you find a place where
   the tool implies otherwise.
-- The local audit log (`~/.orgctl/audit.log`) and any `--reason` text are
+- The local audit log (`~/.ssobroker/audit.log`) and any `--reason` text are
   never transmitted anywhere by this tool except when you explicitly run
-  `orgctl audit-log --push-cloudwatch`.
+  `ssobroker audit-log --push-cloudwatch`.
 
 ## CI/CD supply-chain hardening
 

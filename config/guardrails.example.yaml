@@ -1,14 +1,14 @@
-# ~/.orgctl/guardrails.yaml — optional local speed bumps.
+# ~/.ssobroker/guardrails.yaml — optional local speed bumps.
 # This is NOT a security boundary (IAM permission boundaries / SCPs are).
 # It's a client-side check to catch fat-fingered commands before they
 # reach AWS, and to force a confirmation prompt on risky-but-legitimate ones.
 
-# Account IDs where ANY command via `orgctl exec`/`shell` is blocked outright.
+# Account IDs where ANY command via `ssobroker exec`/`shell` is blocked outright.
 # Useful for a management/root account you never want ad-hoc commands against.
 # Does NOT cover `export-env` or `creds-process` — those are meant to work
 # non-interactively (wired into ~/.aws/config, a script, or CI), so blocking
 # them here would just break that use case rather than add friction to it.
-# If a protected account must never be reachable through orgctl at all,
+# If a protected account must never be reachable through ssobroker at all,
 # don't add it to orgs.yaml (or don't wire creds-process for it).
 protected_account_ids:
   - "111111111111"

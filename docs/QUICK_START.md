@@ -3,20 +3,20 @@
 ## 1. Install
 
 ```bash
-git clone https://github.com/DustyStudy/aws-orgctl.git
-cd aws-orgctl
+git clone https://github.com/DustyStudy/aws-sso-broker.git
+cd aws-sso-broker
 python3 -m pip install -e .
 ```
 
 ## 2. Set up your account registry
 
 ```bash
-orgctl init
+ssobroker init
 ```
 
 This copies the bundled `orgs.example.yaml` (kept in sync with
 [`config/orgs.example.yaml`](../config/orgs.example.yaml) in this repo) to
-`~/.orgctl/orgs.yaml`. Open it and fill in:
+`~/.ssobroker/orgs.yaml`. Open it and fill in:
 
 - `sso_start_url` — your IAM Identity Center portal URL (looks like
   `https://<your-subdomain>.awsapps.com/start`)
@@ -27,7 +27,7 @@ This copies the bundled `orgs.example.yaml` (kept in sync with
 ## 3. Verify
 
 ```bash
-orgctl doctor
+ssobroker doctor
 ```
 
 Confirms your config parses and the local cache directory is writable.
@@ -35,34 +35,34 @@ Confirms your config parses and the local cache directory is writable.
 ## 4. Log in
 
 ```bash
-orgctl login
+ssobroker login
 ```
 
 Opens your browser to approve a device-authorization request — the same
 flow `aws sso login` uses. The resulting token is cached locally
-(`~/.orgctl/cache`) until it naturally expires (typically ~8 hours).
+(`~/.ssobroker/cache`) until it naturally expires (typically ~8 hours).
 
 ## 5. Use it
 
 ```bash
 # One-off command
-orgctl exec -a prod -r read-only -- aws s3 ls
+ssobroker exec -a prod -r read-only -- aws s3 ls
 
 # Interactive session
-orgctl shell -a prod -r read-only
+ssobroker shell -a prod -r read-only
 
 # What am I actually granted right now?
-orgctl list-remote
+ssobroker list-remote
 
 # Review recent activity
-orgctl audit-log
+ssobroker audit-log
 
 # Done for the day
-orgctl logout
+ssobroker logout
 ```
 
 ## Optional: guardrails
 
-Copy `config/guardrails.example.yaml` to `~/.orgctl/guardrails.yaml` and
+Copy `config/guardrails.example.yaml` to `~/.ssobroker/guardrails.yaml` and
 adjust the protected-account list and deny/confirm patterns for your own
 environment.

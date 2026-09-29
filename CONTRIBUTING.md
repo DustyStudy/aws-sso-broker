@@ -1,13 +1,13 @@
 # Contributing
 
-Thanks for taking a look at `orgctl`. This started as a personal tool, so
+Thanks for taking a look at `ssobroker`. This started as a personal tool, so
 the process is intentionally lightweight.
 
 ## Setup
 
 ```bash
-git clone https://github.com/DustyStudy/aws-orgctl.git
-cd aws-orgctl
+git clone https://github.com/DustyStudy/aws-sso-broker.git
+cd aws-sso-broker
 python3 -m pip install -e ".[dev]"
 pre-commit install   # optional but recommended — see below
 ```
@@ -18,7 +18,7 @@ pre-commit install   # optional but recommended — see below
 ruff check src tests
 ruff format src tests
 mypy src
-pytest -v --cov=orgctl --cov-report=term-missing
+pytest -v --cov=ssobroker --cov-report=term-missing
 ```
 
 All four also run in CI (`.github/workflows/ci.yml`) on every push/PR, so a

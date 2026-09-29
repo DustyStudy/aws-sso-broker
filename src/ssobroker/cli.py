@@ -12,6 +12,7 @@ from rich.table import Table
 
 from . import audit, aws_config_sync, cache, config, exec_cmd, sso
 from .config import ConfigError
+from .paths import home_dir
 
 console = Console()
 
@@ -76,7 +77,7 @@ def _cache_dir_writable_error(cdir: Path) -> str | None:
     message, or None if the probe write succeeded."""
     import os
 
-    probe = cdir / f".orgctl_doctor_probe_{os.getpid()}"
+    probe = cdir / f".ssobroker_doctor_probe_{os.getpid()}"
     try:
         probe.write_text("ok")
         probe.unlink()
@@ -86,14 +87,14 @@ def _cache_dir_writable_error(cdir: Path) -> str | None:
 
 
 @click.group()
-@click.version_option(package_name="orgctl")
+@click.version_option(package_name="aws-sso-broker")
 def main():
-    """orgctl — ephemeral AWS multi-account credential manager (IAM Identity Center)."""
+    """ssobroker — ephemeral AWS multi-account credential manager (IAM Identity Center)."""
 
 
 @main.command()
 def init():
-    """Create ~/.orgctl/orgs.yaml from the bundled example, if it doesn't exist yet."""
+    """Create ~/.ssobroker/orgs.yaml from the bundled example, if it doesn't exist yet."""
     dest = config.default_config_path()
     if dest.exists():
         console.print(f"[yellow]Already exists:[/yellow] {dest}")
@@ -159,7 +160,7 @@ def sync_aws_config(prefix: str, all_roles: bool, dry_run: bool):
     if conflicts:
         console.print(
             f"[red]Left {len(conflicts)} profile(s) untouched — a section with that name "
-            f"already exists and wasn't created by orgctl:[/red] {', '.join(sorted(conflicts))} "
+            f"already exists and wasn't created by ssobroker:[/red] {', '.join(sorted(conflicts))} "
             f"(use --prefix to pick different profile names, or rename/remove the existing "
             f"section yourself first)"
         )
@@ -193,7 +194,7 @@ def doctor():
     else:
         console.print(f"[green]OK[/green] cache dir writable: {cdir}")
 
-    gcfg_path = Path.home() / ".orgctl" / "guardrails.yaml"
+    gcfg_path = home_dir() / "guardrails.yaml"
     if gcfg_path.exists():
         console.print(f"[green]OK[/green] guardrails file present: {gcfg_path}")
     else:
@@ -317,7 +318,7 @@ def exec_command(
 
     \b
     Example:
-      orgctl exec -a prod -r read-only -- aws s3 ls
+      ssobroker exec -a prod -r read-only -- aws s3 ls
     """
     cfg = _load_config_or_exit()
     token = _login_or_exit(cfg)
@@ -368,13 +369,13 @@ def export_env(
     account: str, role: str | None, region: str | None, powershell: bool, reason: str | None
 ):
     """Print export statements for --account/--role, for use in your CURRENT
-    shell — as opposed to `orgctl shell`, which spawns a new one.
+    shell — as opposed to `ssobroker shell`, which spawns a new one.
 
     \b
     Example:
-      eval "$(orgctl export-env -a prod -r admin)"
+      eval "$(ssobroker export-env -a prod -r admin)"
       # or, in PowerShell:
-      orgctl export-env -a prod -r admin --powershell | Invoke-Expression
+      ssobroker export-env -a prod -r admin --powershell | Invoke-Expression
 
     Useful inside scripts or CI steps that need the credentials in the shell
     they're already running in, rather than a child subshell.
@@ -401,11 +402,11 @@ def creds_process(account: str, role: str | None):
     """AWS `credential_process` provider — emits clean JSON on stdout only.
 
     Wire this into ~/.aws/config so `aws`/`terraform`/boto3 work natively
-    with --profile, no `orgctl exec` wrapper needed:
+    with --profile, no `ssobroker exec` wrapper needed:
 
     \b
       [profile prod]
-      credential_process = orgctl creds-process --account prod --role read-only
+      credential_process = ssobroker creds-process --account prod --role read-only
 
     All human-readable output (errors, the login URL if a fresh browser
     approval is needed) goes to stderr; stdout carries only the JSON
@@ -417,7 +418,7 @@ def creds_process(account: str, role: str | None):
     try:
         cfg = config.load()
     except ConfigError as e:
-        print(f"orgctl config error: {e}", file=sys.stderr)
+        print(f"ssobroker config error: {e}", file=sys.stderr)
         sys.exit(1)
 
     try:
@@ -425,7 +426,7 @@ def creds_process(account: str, role: str | None):
             cfg.sso_start_url, cfg.sso_region, max_session_hours=cfg.max_session_hours
         )
     except sso.SsoLoginError as e:
-        print(f"orgctl login failed: {e}", file=sys.stderr)
+        print(f"ssobroker login failed: {e}", file=sys.stderr)
         sys.exit(1)
 
     try:
@@ -433,7 +434,7 @@ def creds_process(account: str, role: str | None):
         resolved_role = config.resolve_role(acct, role)
         creds = sso.get_role_credentials(token, acct.account_id, resolved_role)
     except (ConfigError, sso.SsoLoginError) as e:
-        print(f"orgctl error: {e}", file=sys.stderr)
+        print(f"ssobroker error: {e}", file=sys.stderr)
         sys.exit(1)
 
     exp = datetime.datetime.fromtimestamp(creds["Expiration"] / 1000.0, tz=datetime.UTC).strftime(
@@ -519,9 +520,9 @@ def check_policy(account: str, role: str | None, action: str, resource: str):
 @click.argument("shell_name", type=click.Choice(["bash", "zsh", "fish"]))
 def completion(shell_name: str):
     """Print the shell-completion setup line for bash/zsh/fish."""
-    var = f"_ORGCTL_COMPLETE={shell_name}_source"
+    var = f"_SSOBROKER_COMPLETE={shell_name}_source"
     console.print("Add this to your shell profile:\n")
-    console.print(f'  eval "$({var} orgctl)"')
+    console.print(f'  eval "$({var} ssobroker)"')
 
 
 @main.command("audit-log")

@@ -1,5 +1,5 @@
-from orgctl import policy_check
-from orgctl.policy_check import PolicyCheckResult
+from ssobroker import policy_check
+from ssobroker.policy_check import PolicyCheckResult
 
 CREDS = {
     "AccessKeyId": "AKIAFAKE",

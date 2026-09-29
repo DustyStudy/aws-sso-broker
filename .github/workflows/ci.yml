@@ -62,4 +62,4 @@ jobs:
         run: mypy src
 
       - name: Pytest
-        run: pytest -v --cov=orgctl --cov-report=term-missing
+        run: pytest -v --cov=ssobroker --cov-report=term-missing

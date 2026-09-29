@@ -3,8 +3,8 @@ from pathlib import Path
 
 import pytest
 
-from orgctl import aws_config_sync
-from orgctl.config import Account, ConfigError, OrgConfig
+from ssobroker import aws_config_sync
+from ssobroker.config import Account, ConfigError, OrgConfig
 
 
 def _cfg(**accounts: Account) -> OrgConfig:
@@ -39,7 +39,7 @@ def test_writes_new_profile_from_scratch(tmp_path):
     parser = configparser.ConfigParser()
     parser.read(path)
     assert parser.get("profile prod", "credential_process") == (
-        "orgctl creds-process --account prod --role read-only"
+        "ssobroker creds-process --account prod --role read-only"
     )
 
 
@@ -60,7 +60,7 @@ def test_rerun_overwrites_its_own_previously_written_section(tmp_path):
 
 def test_preexisting_unmanaged_profile_is_left_untouched(tmp_path):
     # Simulate a profile the user already had, e.g. from `aws configure`,
-    # that happens to share a name with an orgctl account alias.
+    # that happens to share a name with an ssobroker account alias.
     path = tmp_path / ".aws" / "config"
     path.parent.mkdir(parents=True)
     path.write_text("[profile prod]\naws_access_key_id = AKIAEXAMPLE\nregion = us-west-2\n")
@@ -166,7 +166,7 @@ def test_existing_content_is_preserved_byte_for_byte(tmp_path):
 
     updated = _read(path)
     assert updated.startswith(ORIGINAL_CONFIG)
-    assert "[profile prod]\ncredential_process = orgctl creds-process" in updated
+    assert "[profile prod]\ncredential_process = ssobroker creds-process" in updated
 
 
 def test_rewriting_own_section_keeps_neighbouring_comments(tmp_path):
@@ -253,9 +253,9 @@ def test_section_written_by_older_configparser_version_is_still_recognised(tmp_p
     # managed (so they're updated in place, not reported as conflicts).
     legacy = (
         "[profile prod]\n"
-        "credential_process = orgctl creds-process --account prod --role old\n"
+        "credential_process = ssobroker creds-process --account prod --role old\n"
         "region = us-east-1\n"
-        "_orgctl_managed = true\n"
+        "_ssobroker_managed = true\n"
         "\n"
     )
     path = _write_aws_config(tmp_path, legacy)
@@ -267,6 +267,31 @@ def test_section_written_by_older_configparser_version_is_still_recognised(tmp_p
     assert conflicts == []
     assert "--role new" in _read(path)
     assert _read(path).count("[profile prod]") == 1
+
+
+def test_section_written_under_the_old_orgctl_name_is_taken_over(tmp_path):
+    # Before the rename, sections were tagged `_orgctl_managed` and pointed at
+    # the `orgctl` command. They must be updated in place, not reported as
+    # conflicts, and come out pointing at `ssobroker` with the new marker.
+    legacy = (
+        "[profile prod]\n"
+        "credential_process = orgctl creds-process --account prod --role ro\n"
+        "region = us-east-1\n"
+        "_orgctl_managed = true\n"
+        "\n"
+    )
+    path = _write_aws_config(tmp_path, legacy)
+    cfg = _cfg(prod=Account(alias="prod", account_id="111111111111", roles=["ro"]))
+
+    written, _, conflicts, _, _ = aws_config_sync.sync(cfg)
+
+    updated = _read(path)
+    assert written == ["prod"]
+    assert conflicts == []
+    assert "credential_process = ssobroker creds-process" in updated
+    assert "_ssobroker_managed = true" in updated
+    assert "orgctl" not in updated
+    assert updated.count("[profile prod]") == 1
 
 
 def test_file_without_trailing_newline_gets_clean_separator(tmp_path):

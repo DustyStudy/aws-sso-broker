@@ -11,9 +11,9 @@ import time
 import pytest
 from click.testing import CliRunner
 
-from orgctl import cli, exec_cmd
-from orgctl.config import Account, OrgConfig
-from orgctl.sso import SsoToken, SsoTokenExpiredError
+from ssobroker import cli, exec_cmd
+from ssobroker.config import Account, OrgConfig
+from ssobroker.sso import SsoToken, SsoTokenExpiredError
 
 FAKE_CFG = OrgConfig(
     name="test",
@@ -44,7 +44,7 @@ EXPIRED = SsoTokenExpiredError("Your cached SSO session was rejected by AWS. Run
 
 @pytest.fixture(autouse=True)
 def _isolated(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORGCTL_HOME", str(tmp_path))
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
     monkeypatch.setattr(cli.config, "load", lambda: FAKE_CFG)
     monkeypatch.setattr(cli.sso, "login", lambda *a, **k: FAKE_TOKEN)
     return tmp_path

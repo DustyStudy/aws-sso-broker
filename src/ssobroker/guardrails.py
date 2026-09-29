@@ -16,6 +16,8 @@ from pathlib import Path
 
 import yaml
 
+from .paths import home_dir
+
 
 class GuardrailBlocked(RuntimeError):
     def __init__(self, reason: str, rule: str):
@@ -32,9 +34,7 @@ class GuardrailConfig:
 
     @classmethod
     def load(cls, path: Path | None = None) -> GuardrailConfig:
-        path = path or Path(
-            os.environ.get("ORGCTL_GUARDRAILS", Path.home() / ".orgctl" / "guardrails.yaml")
-        )
+        path = path or Path(os.environ.get("SSOBROKER_GUARDRAILS", home_dir() / "guardrails.yaml"))
         if not path.exists():
             return cls()  # no file = no extra guardrails, just defaults below
         raw = yaml.safe_load(path.read_text()) or {}

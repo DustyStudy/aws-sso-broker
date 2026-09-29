@@ -1,6 +1,6 @@
 # Threat model
 
-This document walks through what `orgctl` protects, who the relevant actors
+This document walks through what `ssobroker` protects, who the relevant actors
 are, and — for each threat scenario considered — what mitigates it and what
 residual risk is left over. It's meant to complement, not repeat,
 [`SECURITY.md`](../.github/SECURITY.md) (vulnerability reporting, code areas
@@ -9,10 +9,10 @@ model" section (the one-paragraph summary). This is the longer version: the
 reasoning behind that summary, spelled out scenario by scenario.
 
 Threat modeling is only useful if it's kept honest, so this document is
-written from the position that `orgctl` is a **convenience and friction
+written from the position that `ssobroker` is a **convenience and friction
 layer on top of AWS SSO**, not a security boundary in itself. Every
 mitigation described below assumes IAM, SCPs, and Identity Center's own
-controls are doing the actual enforcement — `orgctl` just tries not to make
+controls are doing the actual enforcement — `ssobroker` just tries not to make
 things worse, and to add friction/visibility on top.
 
 ## Assets
@@ -21,21 +21,21 @@ What this tool has custody of, at some point, and what protecting it means:
 
 | Asset | Where it lives | What "protected" means |
 |---|---|---|
-| SSO access token | OS keychain (preferred) or `~/.orgctl/` cache file (fallback) | Not written to disk in plaintext when a keychain is available; 0600 permissions and expiry-checked reads when it isn't |
+| SSO access token | OS keychain (preferred) or `~/.ssobroker/` cache file (fallback) | Not written to disk in plaintext when a keychain is available; 0600 permissions and expiry-checked reads when it isn't |
 | Short-lived role credentials (`AccessKeyId`/`SecretAccessKey`/`SessionToken`) | Same cache, keyed per account+role | Same as above, plus never exported outside the one child process/shell that requested them — except via `export-env`/`creds-process`, whose whole purpose is printing them to stdout for the caller's own use (see scenario 4) |
-| `orgs.yaml` (account registry) | `~/.orgctl/orgs.yaml` (or `ORGCTL_CONFIG`) | Contains account IDs and role names only — no secrets — but is still the map an attacker would want to see, and its contents drive which guardrails apply |
-| `guardrails.yaml` | `~/.orgctl/guardrails.yaml` (or `ORGCTL_GUARDRAILS`) | Governs which commands get blocked/confirmed — its integrity matters more than its confidentiality |
-| Local audit log | `~/.orgctl/audit.log` (or `ORGCTL_HOME`) | A record of what was run against which account, for the operator's own review; append-only in practice, not append-only *enforced* (see below) |
+| `orgs.yaml` (account registry) | `~/.ssobroker/orgs.yaml` (or `SSOBROKER_CONFIG`) | Contains account IDs and role names only — no secrets — but is still the map an attacker would want to see, and its contents drive which guardrails apply |
+| `guardrails.yaml` | `~/.ssobroker/guardrails.yaml` (or `SSOBROKER_GUARDRAILS`) | Governs which commands get blocked/confirmed — its integrity matters more than its confidentiality |
+| Local audit log | `~/.ssobroker/audit.log` (or `SSOBROKER_HOME`) | A record of what was run against which account, for the operator's own review; append-only in practice, not append-only *enforced* (see below) |
 | `~/.aws/config` profiles written by `sync-aws-config` | Standard AWS config location | Must not silently absorb or overwrite a profile the tool didn't create |
 
 ## Actors and trust boundaries
 
-- **The operator** (you, running the CLI) — fully trusted. `orgctl` assumes
+- **The operator** (you, running the CLI) — fully trusted. `ssobroker` assumes
   whoever is running it on the local machine is authorized to act as
   themselves; it does no local authentication of its own beyond what the OS
   session already provides.
 - **AWS IAM Identity Center** — trusted as the source of truth for
-  identity and for issuing credentials. `orgctl` never second-guesses an
+  identity and for issuing credentials. `ssobroker` never second-guesses an
   Identity Center authorization decision; it only adds *pre*-AWS friction
   (guardrails) and *post*-hoc local logging (audit log).
 - **Anyone else with access to the same machine/account** (a second local
@@ -56,7 +56,7 @@ What this tool has custody of, at some point, and what protecting it means:
 long-enough-to-matter AWS access.
 
 **Mitigation:** there is no long-lived credential to steal in the first
-place — every credential `orgctl` handles comes from `GetRoleCredentials`
+place — every credential `ssobroker` handles comes from `GetRoleCredentials`
 and expires on its own (typically ~1 hour for role credentials, up to
 `max_session_hours` for the SSO token itself). When a keychain backend is
 available, the SSO token isn't even on disk in a form the attacker can
@@ -69,9 +69,9 @@ file is created 0600 and every read checks expiry before trusting it.
 (or the keychain unlock secret) within the credential's remaining lifetime,
 they get exactly what the legitimate operator could have gotten — same
 account, same role, until expiry. This is inherent to any tool that caches
-credentials locally at all, not something a config change in `orgctl`
+credentials locally at all, not something a config change in `ssobroker`
 fixes; it's why `max_session_hours` exists (force re-auth sooner than AWS's
-own token expiry) and why `orgctl logout` clearing the cache immediately is
+own token expiry) and why `ssobroker logout` clearing the cache immediately is
 part of the documented incident-response step.
 
 ### 2. A malicious or careless command is run against the wrong account
@@ -114,14 +114,14 @@ crafted YAML file, unlike `yaml.load` with the default loader.
 
 **Residual risk:** neither file is integrity-checked (no signature, no
 checksum pinned elsewhere) — if an attacker can write to
-`~/.orgctl/*.yaml`, they can silently change guardrail behavior or, more
+`~/.ssobroker/*.yaml`, they can silently change guardrail behavior or, more
 seriously, redirect `sso_start_url`/`sso_region` to an attacker-controlled
 endpoint and phish the operator's next device-authorization approval. This
 requires local write access to the operator's home directory already,
 which is a fairly high bar (roughly equivalent to "attacker already has
 code execution as this user"), but it's worth naming explicitly rather
-than leaving implicit. Anyone deploying `orgctl` fleet-wide should treat
-`~/.orgctl/orgs.yaml`'s `sso_start_url` the same way they'd treat any other
+than leaving implicit. Anyone deploying `ssobroker` fleet-wide should treat
+`~/.ssobroker/orgs.yaml`'s `sso_start_url` the same way they'd treat any other
 security-relevant config pushed to endpoints — via a managed/attested
 channel, not an ad-hoc copy.
 
@@ -154,9 +154,9 @@ login URL to stderr only, keeping stdout clean JSON for the AWS SDK/CLI to
 parse.
 
 **Residual risk:** once credentials are in a child process's environment,
-`orgctl` has no control over what that child process (or anything *it*
+`ssobroker` has no control over what that child process (or anything *it*
 spawns) does with them — a command that itself echoes `$AWS_SECRET_ACCESS_KEY`
-to a log file, or a `orgctl shell` session where the operator runs
+to a log file, or a `ssobroker shell` session where the operator runs
 something that dumps `env`, is the operator's own action at that point, not
 something this tool can prevent from inside `exec_cmd.py`. `spawn_shell`'s
 subshell prompt tag (`[account:role]`) is a mitigation for the *adjacent*
@@ -171,18 +171,18 @@ configure`, from another tool) results in silent data loss or, worse, a
 
 **Mitigation:** fixed as of the per-section managed-marker change (see
 `aws_config_sync.py`) — a name collision with a section that doesn't carry
-orgctl's own marker is left completely untouched and reported back as a
+ssobroker's own marker is left completely untouched and reported back as a
 conflict, never silently mutated. The file is edited as text rather than
-parsed and re-serialized, so comments and formatting in everything orgctl
+parsed and re-serialized, so comments and formatting in everything ssobroker
 didn't write survive byte-for-byte. Before changing an existing file, the
 previous version is copied to a new timestamped `config.bak-<stamp>`;
 backups are never overwritten, so the original survives repeated runs. A
 run that would change nothing writes nothing and makes no backup. Two
 registry entries that map to the same profile name are rejected outright.
 
-**Residual risk:** orgctl-managed sections are overwritten wholesale on
-re-run, so hand edits made *inside* a section orgctl wrote are lost (the
-timestamped backup is the recovery path). Orgctl never deletes sections it
+**Residual risk:** ssobroker-managed sections are overwritten wholesale on
+re-run, so hand edits made *inside* a section ssobroker wrote are lost (the
+timestamped backup is the recovery path). ssobroker never deletes sections it
 wrote earlier, so profiles from a previous `--prefix`/`--all-roles`
 choice linger until removed by hand. Beyond that, the general "back up
 your own dotfiles" hygiene applies to any tool that writes to
@@ -190,7 +190,7 @@ your own dotfiles" hygiene applies to any tool that writes to
 
 ### 6. Audit log data pushed to CloudWatch is read or tampered with
 
-**Threat:** `orgctl audit-log --push-cloudwatch` sends recent local audit
+**Threat:** `ssobroker audit-log --push-cloudwatch` sends recent local audit
 entries (account IDs, roles, commands run, free-text `--reason` values) to
 a CloudWatch Logs group. Anyone who can read that log group sees an
 operator's command history; anyone who can write to it could inject
@@ -200,12 +200,12 @@ forged entries.
 set) and uses whatever credentials are already active in the calling
 shell — meaning the operator controls, via their own IAM setup, exactly
 which role has `logs:PutLogEvents`/`logs:CreateLogStream` on that group.
-`orgctl` itself requests no broader permission than that.
+`ssobroker` itself requests no broader permission than that.
 
 **Residual risk:** this is entirely a function of how the operator
 provisions and secures the destination log group (encryption at rest, log
 group resource policy, who has `logs:GetLogEvents` on it) — outside this
-tool's control by design. `orgctl` does not create the log group and does
+tool's control by design. `ssobroker` does not create the log group and does
 not set access policy on it. Worth calling out explicitly: the
 `--reason` field is free text the operator types, not validated against a
 ticketing system, so treat it as a note-to-self / good-faith annotation,
@@ -219,7 +219,7 @@ evidence of a command that was run.
 **Mitigation:** none, and this is intentional — see "Explicitly out of
 scope."
 
-**Residual risk:** total. `~/.orgctl/audit.log` is a plain, appendable text
+**Residual risk:** total. `~/.ssobroker/audit.log` is a plain, appendable text
 file with no protection against an operator (or anything running with
 their OS privileges) editing or truncating it. This is fine for its stated
 purpose — "what did I run against prod last Tuesday," a convenience for
@@ -235,7 +235,7 @@ Naming these directly, rather than leaving them as an implied gap:
 
 - **A determined operator bypassing their own guardrails.** Guardrails are
   a speed bump for the *accidental* case, not an access-control mechanism.
-  Anyone with legitimate `orgctl`/AWS access who wants to run a
+  Anyone with legitimate `ssobroker`/AWS access who wants to run a
   guardrail-matched command already has a dozen ways around client-side
   pattern matching (see scenario 2). The correct control for "this
   identity must never be able to do X" is IAM/SCPs, which don't care what
@@ -248,7 +248,7 @@ Naming these directly, rather than leaving them as an implied gap:
   behavior. No client-side tool can fully defend against this; it's the
   same trust boundary every local CLI (including the AWS CLI itself)
   operates within.
-- **A compromised or malicious Identity Center administrator.** `orgctl`
+- **A compromised or malicious Identity Center administrator.** `ssobroker`
   trusts Identity Center's authorization decisions completely — it has no
   mechanism to detect or resist a case where Identity Center itself has
   been misconfigured or its admin access compromised. That's an identity
@@ -257,17 +257,17 @@ Naming these directly, rather than leaving them as an implied gap:
 - **Network-level attacks against the SSO OIDC device-authorization flow**
   (e.g. an attacker intercepting the verification URL before the operator
   approves it). This is AWS SSO OIDC's own protocol design, not something
-  `orgctl` implements or could add mitigations to beyond what the protocol
+  `ssobroker` implements or could add mitigations to beyond what the protocol
   already provides (short-lived device codes, user-driven approval in a
   separate, trusted browser context).
 - **Auditability/non-repudiation of the local audit log** — see scenario 7.
 
 ## Recommended compensating controls (for whoever deploys this)
 
-None of these are things `orgctl` does for you — they're the actual
+None of these are things `ssobroker` does for you — they're the actual
 enforcement layer this tool assumes exists around it:
 
-- IAM permission boundaries and/or SCPs on every role `orgctl` can assume,
+- IAM permission boundaries and/or SCPs on every role `ssobroker` can assume,
   scoped to least privilege for that role's actual job.
 - CloudTrail enabled org-wide, as the real (tamper-evident, AWS-side)
   record of API activity — not the local audit log.

@@ -17,15 +17,15 @@ import boto3
 import pytest
 from moto import mock_aws
 
-from orgctl import audit
+from ssobroker import audit
 
 REGION = "us-east-1"
-LOG_GROUP = "/orgctl/audit"
+LOG_GROUP = "/ssobroker/audit"
 
 
 @pytest.fixture(autouse=True)
 def _home(tmp_path, monkeypatch):
-    monkeypatch.setenv("ORGCTL_HOME", str(tmp_path))
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
     return tmp_path
 
 

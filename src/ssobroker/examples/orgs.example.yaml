@@ -1,4 +1,4 @@
-# ~/.orgctl/orgs.yaml — your personal AWS account registry.
+# ~/.ssobroker/orgs.yaml — your personal AWS account registry.
 # No secrets live here — just aliases, account IDs, and role names.
 
 name: my-org                                  # any label you want
@@ -12,10 +12,10 @@ default_region: us-east-1                     # default region for `exec`/`shell
 max_session_hours: 8
 
 # Optional: push audit-log entries to this CloudWatch Logs log group when you
-# run `orgctl audit-log --push-cloudwatch`. Requires logs:PutLogEvents on
+# run `ssobroker audit-log --push-cloudwatch`. Requires logs:PutLogEvents on
 # whatever role you're using to push (usually a separate low-privilege one,
 # not the account roles below). Leave unset to keep the audit log local-only.
-# cloudwatch_log_group: /orgctl/audit
+# cloudwatch_log_group: /ssobroker/audit
 
 accounts:
   management:

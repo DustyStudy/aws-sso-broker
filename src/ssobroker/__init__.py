@@ -1,4 +1,4 @@
-"""orgctl — ephemeral AWS multi-account credential manager.
+"""ssobroker — ephemeral AWS multi-account credential manager.
 
 Built on IAM Identity Center (AWS SSO). Never stores long-lived access keys;
 all credentials are short-lived, cached locally with an expiry, and scoped to
