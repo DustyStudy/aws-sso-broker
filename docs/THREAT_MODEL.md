@@ -206,9 +206,7 @@ which role has `logs:PutLogEvents`/`logs:CreateLogStream` on that group.
 provisions and secures the destination log group (encryption at rest, log
 group resource policy, who has `logs:GetLogEvents` on it) — outside this
 tool's control by design. `orgctl` does not create the log group and does
-not set access policy on it; see the companion
-[`aws-observability-dashboards`](https://github.com/DustyStudy/aws-observability-dashboards)
-repo for that side of the setup. Worth calling out explicitly: the
+not set access policy on it. Worth calling out explicitly: the
 `--reason` field is free text the operator types, not validated against a
 ticketing system, so treat it as a note-to-self / good-faith annotation,
 not a tamper-evident justification.
