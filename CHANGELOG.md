@@ -10,6 +10,17 @@ workflow is active (see `.github/workflows/release-please.yml`) — it opens
 a PR that moves these into a versioned section on each release. Until the
 first tag exists, this file is maintained by hand.
 
+## [0.2.0](https://github.com/DustyStudy/aws-sso-broker/compare/aws-sso-broker-v0.1.7...aws-sso-broker-v0.2.0) (2026-09-29)
+
+
+### ⚠ BREAKING CHANGES
+
+* the CLI command is ssobroker instead of orgctl, and the ORGCTL_* environment variables are replaced by SSOBROKER_*.
+
+### Features
+
+* rename project to aws-sso-broker ([#3](https://github.com/DustyStudy/aws-sso-broker/issues/3)) ([b939af2](https://github.com/DustyStudy/aws-sso-broker/commit/b939af24f24afe9a379445f4460374e42568b7a9))
+
 ## [0.1.7](https://github.com/DustyStudy/aws-sso-broker/compare/orgctl-v0.1.6...orgctl-v0.1.7) (2026-09-29)
 
 
