@@ -22,6 +22,41 @@ drives the same Identity Center device-authorization flow the console uses,
 caches the resulting short-lived credentials locally, and exposes a simple
 CLI (`exec`, `shell`) for using them.
 
+## How it works
+
+```mermaid
+sequenceDiagram
+    actor Op as Operator
+    participant CLI as ssobroker
+    participant Cache as Local cache<br/>(OS keychain or 0600 file)
+    participant IdC as IAM Identity Center
+    participant Child as Child process
+
+    Op->>CLI: ssobroker exec -a prod -r read-only -- aws s3 ls
+    CLI->>Cache: SSO token still valid and under max_session_hours?
+    alt no valid token
+        CLI->>IdC: RegisterClient, StartDeviceAuthorization
+        IdC-->>Op: Browser approval page
+        CLI->>IdC: CreateToken (polls until approved)
+        CLI->>Cache: Store SSO token
+    end
+    CLI->>CLI: Check guardrails.yaml (protected accounts, deny and confirm patterns)
+    alt command blocked
+        CLI->>CLI: Append "blocked" entry to audit.log
+        CLI-->>Op: Exit 2, command never runs
+    else allowed
+        CLI->>IdC: GetRoleCredentials(account, role)
+        IdC-->>CLI: Short-lived role credentials
+        CLI->>CLI: Append entry to audit.log
+        CLI->>Child: Run command with credentials in its environment only
+    end
+```
+
+The broker never holds a long-lived key: the SSO token and role credentials
+both expire on their own, and `ssobroker logout` clears them early.
+[`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) covers what the local
+guardrails do and do not protect against.
+
 ## Features
 
 - **SSO-only.** Uses the AWS SSO OIDC device-authorization grant, the same
