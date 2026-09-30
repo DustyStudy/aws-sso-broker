@@ -100,9 +100,11 @@ def test_auth_code_flow_uses_pkce_and_loopback(monkeypatch):
     # The verifier sent to CreateToken must hash to the challenge in the URL.
     digest = hashlib.sha256(call["codeVerifier"].encode()).digest()
     assert base64.urlsafe_b64encode(digest).rstrip(b"=").decode() == seen["code_challenge"]
-    # The refresh token is never cached.
+    # The refresh token is kept, and the entry lives until the session cap
+    # rather than the 1-hour access-token expiry.
     stored = cache.get(sso._token_cache_key(START_URL, REGION))
-    assert "refreshToken" not in stored
+    assert stored["refreshToken"] == "rt"
+    assert stored["expiresAt"] - stored["issuedAt"] == pytest.approx(8 * 3600, abs=5)
 
 
 def test_auth_code_flow_rejects_wrong_state(monkeypatch):
@@ -312,3 +314,80 @@ def test_keyring_storage_keeps_role_credentials_out_of_files(monkeypatch):
     assert len(kr.store) == 1
     assert cache.clear() == 1
     assert kr.store == {}
+
+
+# --- access-token refresh ---------------------------------------------------------
+
+
+def _cache_refreshable(issued_ago: float, access_left: float, flow: str = "auth_code"):
+    now = time.time()
+    cache.put(
+        sso._client_cache_key(START_URL, REGION, flow),
+        {"clientId": "cid", "clientSecret": "csecret", "expiresAt": now + 86400},
+        keyring=False,
+    )
+    cache.put(
+        sso._token_cache_key(START_URL, REGION),
+        {
+            "accessToken": "old-access",
+            "accessTokenExpiresAt": now + access_left,
+            "expiresAt": now - issued_ago + 8 * 3600,
+            "issuedAt": now - issued_ago,
+            "refreshToken": "rt",
+            "flow": flow,
+            "region": REGION,
+        },
+    )
+
+
+class RefreshingOidc(FakeOidc):
+    def __init__(self, error: str | None = None):
+        super().__init__()
+        self.error = error
+
+    def create_token(self, **kwargs):
+        self.create_token_calls.append(kwargs)
+        if self.error:
+            raise ClientError({"Error": {"Code": self.error, "Message": "x"}}, "CreateToken")
+        return {"accessToken": "refreshed", "expiresIn": 3600, "refreshToken": "rt2"}
+
+
+def test_expired_access_token_is_refreshed_without_a_browser(monkeypatch):
+    oidc = RefreshingOidc()
+    monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: oidc)
+    monkeypatch.setattr(sso.webbrowser, "open", lambda url: pytest.fail("opened a browser"))
+    _cache_refreshable(issued_ago=2 * 3600, access_left=-10)
+
+    token = sso.login(START_URL, REGION)
+
+    assert token.access_token == "refreshed"
+    (call,) = oidc.create_token_calls
+    assert call["grantType"] == "refresh_token" and call["refreshToken"] == "rt"
+    stored = cache.get(sso._token_cache_key(START_URL, REGION))
+    assert stored["refreshToken"] == "rt2"
+    # issuedAt is the original sign-in, so the session cap still counts from it.
+    assert time.time() - stored["issuedAt"] == pytest.approx(2 * 3600, abs=5)
+
+
+def test_valid_access_token_is_not_refreshed(monkeypatch):
+    monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: pytest.fail("called AWS"))
+    _cache_refreshable(issued_ago=60, access_left=1800)
+    assert sso.login(START_URL, REGION).access_token == "old-access"
+
+
+def test_no_refresh_past_max_session_hours(monkeypatch):
+    oidc = RefreshingOidc()
+    monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: oidc)
+    monkeypatch.setattr(sso.webbrowser, "open", lambda url: False)
+    _cache_refreshable(issued_ago=5 * 3600, access_left=-10)
+    sso.login(START_URL, REGION, max_session_hours=4, flow="device_code")
+    grants = [c["grantType"] for c in oidc.create_token_calls]
+    assert grants == ["urn:ietf:params:oauth:grant-type:device_code"]  # fresh sign-in only
+
+
+def test_revoked_refresh_token_falls_back_to_sign_in(monkeypatch):
+    oidc = RefreshingOidc(error="InvalidGrantException")
+    monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: oidc)
+    _cache_refreshable(issued_ago=2 * 3600, access_left=-10)
+    key = sso._token_cache_key(START_URL, REGION)
+    assert sso._usable_token(cache.get(key), key, START_URL, REGION, 8) is None
