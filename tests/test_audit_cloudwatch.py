@@ -72,48 +72,71 @@ def test_push_sends_all_recorded_entries(logs_client):
     assert actions == {"exec", "shell"}
 
 
-def test_push_respects_n_limit(logs_client):
-    for i in range(5):
-        audit.record(action="exec", account_id=str(i), role="r")
-
-    n = audit.push_to_cloudwatch(LOG_GROUP, REGION, n=2)
-    assert n == 2
-
-    events = _get_events(logs_client)
-    assert len(events) == 2
-    messages = [json.loads(e["message"]) for e in events]
-    # tail(n) returns the most recent n entries, in order.
-    assert [m["account_id"] for m in messages] == ["3", "4"]
-
-
-def test_repeated_push_reuses_stream_but_resends_overlapping_entries(logs_client):
-    """push_to_cloudwatch has no "since last push" cursor (see its docstring)
-    — every call resends the last `n` *local* entries regardless of what was
-    already pushed. Two local entries, pushed once each call, means the
-    first entry gets sent twice (once per call) and the second once — 3
-    CloudWatch events total from 2 local audit-log lines. This is documented,
-    intentional behavior, not a bug: it's what "stateless, ad-hoc push"
-    means. What must still hold is the log *stream* itself — same
-    host+user should reuse one stream across calls, not create a new one
-    each time (create_log_stream's ResourceAlreadyExistsException must be
-    swallowed).
-    """
+def test_push_sends_only_entries_not_yet_pushed(logs_client):
+    """A cursor file remembers how many lines were already sent, so a second
+    push sends only what was recorded since (exactly-once for one process)."""
     audit.record(action="exec", account_id="111", role="admin")
-    audit.push_to_cloudwatch(LOG_GROUP, REGION)
+    assert audit.push_to_cloudwatch(LOG_GROUP, REGION) == 1
 
     audit.record(action="exec", account_id="222", role="admin")
-    n = audit.push_to_cloudwatch(LOG_GROUP, REGION)
-
-    assert n == 2  # this call pushed both local entries (111 again, 222 new)
+    assert audit.push_to_cloudwatch(LOG_GROUP, REGION) == 1
+    assert audit.push_to_cloudwatch(LOG_GROUP, REGION) == 0
 
     streams = logs_client.describe_log_streams(logGroupName=LOG_GROUP)["logStreams"]
     assert len(streams) == 1  # one stream reused, not recreated
 
-    events = _get_events(logs_client)
-    assert len(events) == 3  # 1 (first call) + 2 (second call, one a resend)
-    account_ids = [json.loads(e["message"])["account_id"] for e in events]
-    assert account_ids.count("111") == 2  # resent — expected, see docstring
-    assert account_ids.count("222") == 1
+    account_ids = [json.loads(e["message"])["account_id"] for e in _get_events(logs_client)]
+    assert sorted(account_ids) == ["111", "222"]
+
+
+def test_push_starts_over_if_log_was_truncated(logs_client):
+    for i in range(3):
+        audit.record(action="exec", account_id=str(i), role="r")
+    assert audit.push_to_cloudwatch(LOG_GROUP, REGION) == 3
+
+    # Log rotated: fewer lines than the cursor says were sent.
+    audit.log_path().write_text("")
+    audit.record(action="exec", account_id="new", role="r")
+    assert audit.push_to_cloudwatch(LOG_GROUP, REGION) == 1
+
+
+def test_push_uses_explicit_credentials_when_given(logs_client, monkeypatch):
+    seen = {}
+    real_session = boto3.Session
+
+    def _session(**kwargs):
+        seen.update(kwargs)
+        return real_session(region_name=kwargs["region_name"])
+
+    monkeypatch.setattr(boto3, "Session", _session)
+    audit.record(action="exec", account_id="111", role="admin")
+    creds = {"AccessKeyId": "AKIALOG", "SecretAccessKey": "s", "SessionToken": "t"}
+    assert audit.push_to_cloudwatch(LOG_GROUP, REGION, credentials=creds) == 1
+    assert seen["aws_access_key_id"] == "AKIALOG"
+
+
+def test_record_forwards_to_cloudwatch_when_configured(logs_client):
+    audit.configure(
+        audit.AuditSettings(
+            forward=["cloudwatch"], cloudwatch_log_group=LOG_GROUP, cloudwatch_region=REGION
+        )
+    )
+    audit.record(action="exec", account_id="111", role="admin")
+    assert len(_get_events(logs_client)) == 1
+
+
+def test_forwarding_failure_warns_but_still_writes_local_log(capsys):
+    with mock_aws():
+        audit.configure(
+            audit.AuditSettings(
+                forward=["cloudwatch"],
+                cloudwatch_log_group="/does/not/exist",
+                cloudwatch_region=REGION,
+            )
+        )
+        audit.record(action="exec", account_id="111", role="admin")
+    assert audit.tail(1)[0]["account_id"] == "111"
+    assert "cloudwatch failed" in capsys.readouterr().err
 
 
 def test_push_uses_each_entrys_own_timestamp_not_push_time(logs_client):

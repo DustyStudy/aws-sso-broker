@@ -344,3 +344,72 @@ def test_spawn_shell_proceeds_when_account_not_protected(cfg, fake_get_creds, fa
     assert rc == 0
     assert fake_get_creds == [("111111111111", "admin")]
     assert len(fake_subprocess) == 1
+
+
+def test_other_ambient_credential_sources_are_stripped(
+    cfg, fake_get_creds, fake_subprocess, monkeypatch
+):
+    for name in exec_cmd._STRIP_ENV:
+        monkeypatch.setenv(name, "from-parent")
+
+    exec_cmd.run(
+        cfg,
+        sso_token=None,
+        account_alias_or_id="prod",
+        role="admin",
+        command=["aws", "sts", "get-caller-identity"],
+        gcfg=guardrails.GuardrailConfig(),
+    )
+
+    ((_, env),) = fake_subprocess
+    assert not any(name in env for name in exec_cmd._STRIP_ENV)
+
+
+def test_exec_audit_entry_carries_access_key_id(cfg, fake_get_creds, fake_subprocess, tmp_path):
+    exec_cmd.run(
+        cfg,
+        sso_token=None,
+        account_alias_or_id="prod",
+        role="admin",
+        command=["aws", "s3", "ls"],
+        gcfg=guardrails.GuardrailConfig(),
+    )
+    assert _last_audit_entry(tmp_path)["access_key_id"] == "AKIAFAKE"
+
+
+def test_default_shell_honours_override():
+    assert exec_cmd._default_shell({"SSOBROKER_SHELL": "/bin/zsh"}) == "/bin/zsh"
+
+
+def test_default_shell_on_windows_prefers_pwsh_then_comspec(monkeypatch):
+    monkeypatch.setattr(exec_cmd.os, "name", "nt")
+    monkeypatch.setattr(exec_cmd.shutil, "which", lambda n: "C:/pwsh.exe" if n == "pwsh" else None)
+    assert exec_cmd._default_shell({}) == "C:/pwsh.exe"
+    monkeypatch.setattr(exec_cmd.shutil, "which", lambda n: None)
+    assert exec_cmd._default_shell({"COMSPEC": "C:/cmd.exe"}) == "C:/cmd.exe"
+
+
+def test_credential_process_payload_shape(cfg, monkeypatch):
+    monkeypatch.setattr(
+        exec_cmd, "fetch_role_credentials", lambda *a, **k: (dict(FAKE_CREDS), False)
+    )
+    payload = exec_cmd.credential_process_payload(
+        cfg, None, "prod", "admin", gcfg=guardrails.GuardrailConfig()
+    )
+    assert payload["Version"] == 1
+    assert payload["AccessKeyId"] == "AKIAFAKE"
+    assert payload["Expiration"].endswith("Z")
+
+
+def test_protected_account_allowed_for_creds_process_unless_strict(cfg, monkeypatch):
+    monkeypatch.setattr(
+        exec_cmd, "fetch_role_credentials", lambda *a, **k: (dict(FAKE_CREDS), True)
+    )
+    loose = guardrails.GuardrailConfig(protected_account_ids=["111111111111"])
+    assert exec_cmd.credential_process_payload(cfg, None, "prod", "admin", gcfg=loose)
+
+    strict = guardrails.GuardrailConfig(
+        protected_account_ids=["111111111111"], strict_protected_accounts=True
+    )
+    with pytest.raises(guardrails.GuardrailBlocked):
+        exec_cmd.credential_process_payload(cfg, None, "prod", "admin", gcfg=strict)

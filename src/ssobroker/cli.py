@@ -10,7 +10,7 @@ import click
 from rich.console import Console
 from rich.table import Table
 
-from . import audit, aws_config_sync, cache, config, exec_cmd, sso
+from . import audit, aws_config_sync, cache, config, exec_cmd, guardrails, network, policy, sso
 from .config import ConfigError
 from .paths import home_dir
 
@@ -19,17 +19,52 @@ console = Console()
 T = TypeVar("T")
 
 
+def _sso_login(cfg: config.OrgConfig, flow: str | None = None) -> sso.SsoToken:
+    return sso.login(
+        cfg.sso_start_url,
+        cfg.sso_region,
+        max_session_hours=cfg.max_session_hours,
+        flow=flow or cfg.login_flow,
+        allow_device_code=cfg.allow_device_code,
+        role_credential_cache=cfg.role_credential_cache,
+    )
+
+
+def _logging_role_credentials(cfg: config.OrgConfig) -> Callable[[], dict] | None:
+    """Credentials provider for the CloudWatch logging role, if one is set."""
+    if not (cfg.cloudwatch_account and cfg.cloudwatch_role):
+        return None
+    account_id = config.logging_account_id(cfg)
+    role = cfg.cloudwatch_role
+    return lambda: sso.get_role_credentials(_sso_login(cfg), account_id, role)
+
+
+def _prepare(cfg: config.OrgConfig) -> config.OrgConfig:
+    """Apply network settings and audit settings from a loaded config."""
+    network.apply(cfg)
+    audit.configure(
+        audit.AuditSettings(
+            redact_patterns=cfg.audit_redact_flags,
+            forward=cfg.audit_forward,
+            cloudwatch_log_group=cfg.cloudwatch_log_group,
+            cloudwatch_region=cfg.default_region,
+            cloudwatch_credentials=_logging_role_credentials(cfg),
+        )
+    )
+    return cfg
+
+
 def _load_config_or_exit() -> config.OrgConfig:
     try:
-        return config.load()
+        return _prepare(config.load())
     except ConfigError as e:
         console.print(f"[red]Config error:[/red] {e}")
         sys.exit(1)
 
 
-def _login_or_exit(cfg: config.OrgConfig) -> sso.SsoToken:
+def _login_or_exit(cfg: config.OrgConfig, flow: str | None = None) -> sso.SsoToken:
     try:
-        return sso.login(cfg.sso_start_url, cfg.sso_region, max_session_hours=cfg.max_session_hours)
+        return _sso_login(cfg, flow)
     except sso.SsoLoginError as e:
         console.print(f"[red]Login failed:[/red] {e}")
         sys.exit(1)
@@ -45,6 +80,9 @@ def _guard(fn: Callable[..., T], *args: object, **kwargs: object) -> T:
     except (ConfigError, sso.SsoLoginError) as e:
         console.print(f"[red]Error:[/red] {e}")
         sys.exit(1)
+    except guardrails.GuardrailBlocked as e:
+        console.print(f"[red]BLOCKED by guardrails:[/red] {e}")
+        sys.exit(2)
 
 
 def _resolve_and_get_creds(
@@ -90,6 +128,11 @@ def _cache_dir_writable_error(cdir: Path) -> str | None:
 @click.version_option(package_name="aws-sso-broker")
 def main():
     """ssobroker — ephemeral AWS multi-account credential manager (IAM Identity Center)."""
+    try:
+        policy.load()
+    except policy.PolicyError as e:
+        print(f"ssobroker: {e}", file=sys.stderr)
+        sys.exit(1)
 
 
 @main.command()
@@ -106,10 +149,16 @@ def init():
 
 
 @main.command()
-def login():
-    """Log in via IAM Identity Center (opens a browser for device approval)."""
+@click.option(
+    "--use-device-code",
+    is_flag=True,
+    help="Use the device-code flow (for machines with no local browser). "
+    "Only approve a sign-in request you started yourself.",
+)
+def login(use_device_code: bool):
+    """Log in via IAM Identity Center (opens a browser to sign in)."""
     cfg = _load_config_or_exit()
-    token = _login_or_exit(cfg)
+    token = _login_or_exit(cfg, "device_code" if use_device_code else None)
     console.print(f"[green]Logged in[/green] to '{cfg.name}' — token cached until expiry.")
     _ = token
 
@@ -169,19 +218,46 @@ def sync_aws_config(prefix: str, all_roles: bool, dry_run: bool):
 
 
 @main.command()
-def logout():
-    """Clear all cached SSO tokens and role credentials."""
-    n = cache.clear()
+@click.option(
+    "--local-only",
+    is_flag=True,
+    help="Only clear the local cache; don't sign the SSO session out at AWS.",
+)
+def logout(local_only: bool):
+    """Sign out of Identity Center and clear all cached tokens and credentials.
+
+    Role credentials issued earlier stay valid at AWS until they expire."""
+    errors: list[str] = []
+    if local_only:
+        n = cache.clear()
+    else:
+        try:
+            _prepare(config.load())
+        except ConfigError:
+            pass  # network settings are optional here; logout must still work
+        n, errors = sso.logout()
     console.print(f"Cleared {n} cached entr{'y' if n == 1 else 'ies'}.")
+    for err in errors:
+        console.print(f"[yellow]Server-side sign-out failed ({err}); local cache cleared.[/yellow]")
 
 
 @main.command()
 def doctor():
     """Sanity-check config, cache dir, and guardrails file."""
     problems = []
+    pol = policy.load()
+    if pol.active:
+        console.print(f"[green]OK[/green] managed policy applied: {pol.path}")
+    else:
+        console.print(f"[dim]NOTE no managed policy at {policy.managed_policy_path()}[/dim]")
     try:
         cfg = config.load()
         console.print(f"[green]OK[/green] config loaded: {cfg.name} ({len(cfg.accounts)} accounts)")
+        console.print(
+            f"[green]OK[/green] login flow: {cfg.login_flow}; role credential cache: "
+            f"{cfg.role_credential_cache}; audit forwarding: "
+            f"{', '.join(cfg.audit_forward) or 'off'}"
+        )
     except ConfigError as e:
         problems.append(str(e))
         console.print(f"[red]FAIL[/red] config: {e}")
@@ -412,45 +488,30 @@ def creds_process(account: str, role: str | None):
     approval is needed) goes to stderr; stdout carries only the JSON
     document AWS tooling expects.
     """
-    import datetime
     import json
 
     try:
-        cfg = config.load()
+        cfg = _prepare(config.load())
     except ConfigError as e:
         print(f"ssobroker config error: {e}", file=sys.stderr)
         sys.exit(1)
 
     try:
-        token = sso.login(
-            cfg.sso_start_url, cfg.sso_region, max_session_hours=cfg.max_session_hours
-        )
+        token = _sso_login(cfg)
     except sso.SsoLoginError as e:
         print(f"ssobroker login failed: {e}", file=sys.stderr)
         sys.exit(1)
 
     try:
-        acct = config.resolve_account(cfg, account)
-        resolved_role = config.resolve_role(acct, role)
-        creds = sso.get_role_credentials(token, acct.account_id, resolved_role)
+        payload = exec_cmd.credential_process_payload(cfg, token, account, role)
     except (ConfigError, sso.SsoLoginError) as e:
         print(f"ssobroker error: {e}", file=sys.stderr)
         sys.exit(1)
+    except guardrails.GuardrailBlocked as e:
+        print(f"ssobroker: BLOCKED by guardrails: {e}", file=sys.stderr)
+        sys.exit(2)
 
-    exp = datetime.datetime.fromtimestamp(creds["Expiration"] / 1000.0, tz=datetime.UTC).strftime(
-        "%Y-%m-%dT%H:%M:%SZ"
-    )
-    print(
-        json.dumps(
-            {
-                "Version": 1,
-                "AccessKeyId": creds["AccessKeyId"],
-                "SecretAccessKey": creds["SecretAccessKey"],
-                "SessionToken": creds["SessionToken"],
-                "Expiration": exp,
-            }
-        )
-    )
+    print(json.dumps(payload))
 
 
 @main.command()
@@ -531,9 +592,9 @@ def completion(shell_name: str):
 @click.option(
     "--push-cloudwatch",
     is_flag=True,
-    help="Also push these entries to the CloudWatch Logs group configured as "
-    "'cloudwatch_log_group' in orgs.yaml, using whatever credentials are "
-    "already active in this shell.",
+    help="Also push entries not yet sent to the CloudWatch Logs group set as "
+    "'cloudwatch_log_group' in orgs.yaml, using the cloudwatch_account/cloudwatch_role "
+    "logging role if set, else whatever credentials are active in this shell.",
 )
 def audit_log(n: int, as_json: bool, push_cloudwatch: bool):
     """Show recent entries from the local audit log."""
@@ -574,11 +635,16 @@ def audit_log(n: int, as_json: bool, push_cloudwatch: bool):
             )
             sys.exit(1)
         try:
-            pushed = audit.push_to_cloudwatch(cfg.cloudwatch_log_group, cfg.default_region, n)
+            provider = _logging_role_credentials(cfg)
+            pushed = audit.push_to_cloudwatch(
+                cfg.cloudwatch_log_group,
+                cfg.default_region,
+                credentials=provider() if provider else None,
+            )
         except Exception as e:  # noqa: BLE001
             console.print(f"[red]CloudWatch push failed:[/red] {e}")
             sys.exit(1)
-        console.print(f"[green]Pushed {pushed} entries[/green] to {cfg.cloudwatch_log_group}")
+        console.print(f"[green]Pushed {pushed} new entries[/green] to {cfg.cloudwatch_log_group}")
 
 
 if __name__ == "__main__":

@@ -5,4 +5,9 @@ all credentials are short-lived, cached locally with an expiry, and scoped to
 the account/role/session the user explicitly requests.
 """
 
-__version__ = "0.1.7"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("aws-sso-broker")
+except PackageNotFoundError:  # running from a source tree that was never installed
+    __version__ = "0+unknown"

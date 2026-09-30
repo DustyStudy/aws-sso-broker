@@ -22,6 +22,7 @@ classifiers = [
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
     "Topic :: System :: Systems Administration",
     "Topic :: Security",
 ]
@@ -44,6 +45,10 @@ dev = [
 ]
 keyring = [
     "keyring>=24.0",
+]
+# Windows Event Log forwarding (audit_forward: [eventlog]).
+windows = [
+    "pywin32>=306; sys_platform == 'win32'",
 ]
 
 [project.scripts]

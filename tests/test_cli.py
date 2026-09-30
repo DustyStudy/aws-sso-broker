@@ -11,7 +11,7 @@ import time
 import pytest
 from click.testing import CliRunner
 
-from ssobroker import cli, exec_cmd
+from ssobroker import audit, cli, exec_cmd
 from ssobroker.config import Account, OrgConfig
 from ssobroker.sso import SsoToken, SsoTokenExpiredError
 
@@ -161,18 +161,102 @@ def test_creds_process_unknown_account_is_a_clean_stderr_error():
 
 def test_creds_process_expired_token_is_a_clean_stderr_error(monkeypatch):
     monkeypatch.setattr(
-        cli.sso, "get_role_credentials", lambda *a, **k: (_ for _ in ()).throw(EXPIRED)
+        exec_cmd, "fetch_role_credentials", lambda *a, **k: (_ for _ in ()).throw(EXPIRED)
     )
     result = invoke("creds-process", "-a", "prod")
     _clean_exit(result)
 
 
 def test_creds_process_success_prints_only_json_to_stdout(monkeypatch):
-    monkeypatch.setattr(cli.sso, "get_role_credentials", lambda *a, **k: dict(FAKE_CREDS))
+    monkeypatch.setattr(
+        exec_cmd, "fetch_role_credentials", lambda *a, **k: (dict(FAKE_CREDS), True)
+    )
     result = invoke("creds-process", "-a", "prod")
     assert result.exit_code == 0
     assert result.output.strip().startswith("{")
     assert "AKIAFAKE" in result.output
+
+
+def test_creds_process_audits_fresh_fetch_only(monkeypatch, _isolated):
+    fresh = iter([True, False])
+    monkeypatch.setattr(
+        exec_cmd, "fetch_role_credentials", lambda *a, **k: (dict(FAKE_CREDS), next(fresh))
+    )
+    invoke("creds-process", "-a", "prod")
+    invoke("creds-process", "-a", "prod")
+    entries = audit.tail(10)
+    assert len(entries) == 1
+    assert entries[0]["action"] == "creds-process"
+    assert entries[0]["access_key_id"] == "AKIAFAKE"
+
+
+def test_creds_process_blocks_protected_account_in_strict_mode(monkeypatch, _isolated):
+    (_isolated / "guardrails.yaml").write_text(
+        'strict_protected_accounts: true\nprotected_account_ids: ["111111111111"]\n'
+    )
+    monkeypatch.setattr(
+        exec_cmd, "fetch_role_credentials", lambda *a, **k: pytest.fail("fetched creds")
+    )
+    result = invoke("creds-process", "-a", "prod")
+    _clean_exit(result, exit_code=2)
+    assert "AKIAFAKE" not in result.output
+    assert audit.tail(1)[0]["result"] == "blocked"
+
+
+def test_export_env_blocks_protected_account_in_strict_mode(monkeypatch, _isolated):
+    (_isolated / "guardrails.yaml").write_text(
+        'strict_protected_accounts: true\nprotected_account_ids: ["111111111111"]\n'
+    )
+    monkeypatch.setattr(
+        exec_cmd, "get_role_credentials", lambda *a, **k: pytest.fail("fetched creds")
+    )
+    result = invoke("export-env", "-a", "prod")
+    _clean_exit(result, exit_code=2)
+
+
+# --- login / logout ------------------------------------------------------------------
+
+
+def test_login_use_device_code_passes_flow(monkeypatch):
+    seen = {}
+
+    def _login(*a, **k):
+        seen.update(k)
+        return FAKE_TOKEN
+
+    monkeypatch.setattr(cli.sso, "login", _login)
+    result = invoke("login", "--use-device-code")
+    assert result.exit_code == 0
+    assert seen["flow"] == "device_code"
+
+
+def test_logout_signs_out_server_side(monkeypatch):
+    monkeypatch.setattr(cli.sso, "logout", lambda: (2, []))
+    result = invoke("logout")
+    assert result.exit_code == 0
+    assert "Cleared 2 cached entries" in result.output
+
+
+def test_logout_reports_server_side_failure_but_still_clears(monkeypatch):
+    monkeypatch.setattr(cli.sso, "logout", lambda: (1, ["us-east-1: EndpointConnectionError"]))
+    result = invoke("logout")
+    assert result.exit_code == 0
+    assert "Server-side sign-out failed" in result.output
+
+
+def test_logout_local_only_never_calls_aws(monkeypatch):
+    monkeypatch.setattr(cli.sso, "logout", lambda: pytest.fail("called AWS"))
+    result = invoke("logout", "--local-only")
+    assert result.exit_code == 0
+
+
+def test_invalid_managed_policy_stops_every_command(monkeypatch, tmp_path):
+    from conftest import write_policy
+
+    write_policy(monkeypatch, tmp_path, "not_a_real_setting: true\n")
+    result = invoke("accounts")
+    assert result.exit_code == 1
+    assert "Unknown field" in result.output
 
 
 # --- doctor --------------------------------------------------------------------------

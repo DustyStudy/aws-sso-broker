@@ -24,9 +24,8 @@ from pathlib import Path
 from .paths import home_dir
 
 KEYRING_SERVICE = "ssobroker"
-# Only SSO tokens go through the OS keychain — role credentials are already
-# short-lived (~1h) and scoped per account/role, so the extra indirection
-# isn't worth it for them.
+# SSO tokens go through the OS keychain by default. Role credentials only do
+# when the caller asks (role_credential_cache: keyring in orgs.yaml).
 _KEYRING_ELIGIBLE_PREFIX = "sso-token_"
 
 
@@ -46,6 +45,10 @@ def _keyring_module():
         return keyring
     except Exception:
         return None
+
+
+def keyring_available() -> bool:
+    return _keyring_module() is not None
 
 
 def cache_dir() -> Path:
@@ -107,22 +110,36 @@ def _keyring_index() -> set[str]:
 def _keyring_index_add(key: str) -> None:
     idx = _keyring_index()
     idx.add(key)
-    _keyring_index_path().write_text(json.dumps(sorted(idx)))
-    _lock_down(_keyring_index_path())
+    _write_locked_down(_keyring_index_path(), json.dumps(sorted(idx)))
 
 
 def _keyring_index_remove(key: str) -> None:
     idx = _keyring_index()
+    if key not in idx:
+        return
     idx.discard(key)
-    _keyring_index_path().write_text(json.dumps(sorted(idx)))
+    _write_locked_down(_keyring_index_path(), json.dumps(sorted(idx)))
 
 
-def _use_keyring_for(key: str) -> bool:
+def _use_keyring_for(key: str, keyring: bool | None) -> bool:
+    if keyring is not None:
+        return keyring
     return key.startswith(_KEYRING_ELIGIBLE_PREFIX)
 
 
-def get(key: str) -> dict | None:
-    if _use_keyring_for(key):
+def keys(prefix: str) -> list[str]:
+    """Every cached key starting with `prefix`, file-based or in the keychain."""
+    found = {p.stem for p in cache_dir().glob(f"{prefix}*.json")}
+    found |= {k for k in _keyring_index() if k.startswith(prefix)}
+    return sorted(found)
+
+
+def get(key: str, *, keyring: bool | None = None) -> dict | None:
+    """Return the cached value for `key`, or None if missing or expired.
+
+    `keyring` picks the OS keychain (True) or the file cache only (False);
+    None means the default for that key (keychain for SSO tokens)."""
+    if _use_keyring_for(key, keyring):
         kr = _keyring_module()
         if kr is not None:
             try:
@@ -160,8 +177,8 @@ def get(key: str) -> dict | None:
     return data
 
 
-def put(key: str, value: dict) -> None:
-    if _use_keyring_for(key):
+def put(key: str, value: dict, *, keyring: bool | None = None) -> None:
+    if _use_keyring_for(key, keyring):
         kr = _keyring_module()
         if kr is not None:
             try:
@@ -196,11 +213,9 @@ def clear(key: str | None = None) -> int:
     removed = 0
 
     if key:
-        if _use_keyring_for(key):
-            before = key in _keyring_index()
+        if key in _keyring_index():
             _keyring_delete(key)
-            if before:
-                removed += 1
+            removed += 1
         p = _path_for(key)
         if p.exists():
             p.unlink()

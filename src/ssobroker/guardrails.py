@@ -10,12 +10,12 @@ this just adds friction and an audit trail on the client side.
 from __future__ import annotations
 
 import fnmatch
-import os
 from dataclasses import dataclass, field
 from pathlib import Path
 
 import yaml
 
+from . import policy
 from .paths import home_dir
 
 
@@ -31,18 +31,37 @@ class GuardrailConfig:
     deny_patterns: list[str] = field(default_factory=list)
     protected_account_ids: list[str] = field(default_factory=list)
     require_confirmation_patterns: list[str] = field(default_factory=list)
+    # When true, protected accounts are also refused by `export-env` and
+    # `creds-process`, not just `exec`/`shell`. The managed policy can turn
+    # this on; a user file can't turn it back off.
+    strict_protected_accounts: bool = False
 
     @classmethod
     def load(cls, path: Path | None = None) -> GuardrailConfig:
-        path = path or Path(os.environ.get("SSOBROKER_GUARDRAILS", home_dir() / "guardrails.yaml"))
-        if not path.exists():
-            return cls()  # no file = no extra guardrails, just defaults below
-        raw = yaml.safe_load(path.read_text()) or {}
+        """Load the user's guardrails.yaml (if any), then add the managed
+        policy's guardrails on top. Policy entries are always added, never
+        replaced by the user's file."""
+        override = policy.env_override("SSOBROKER_GUARDRAILS")
+        path = path or (Path(override) if override else home_dir() / "guardrails.yaml")
+        raw = (yaml.safe_load(path.read_text()) or {}) if path.exists() else {}
+        pol = policy.load()
         return cls(
-            deny_patterns=list(raw.get("deny_patterns", [])),
-            protected_account_ids=[str(a) for a in raw.get("protected_account_ids", [])],
-            require_confirmation_patterns=list(raw.get("require_confirmation_patterns", [])),
+            deny_patterns=_merge(raw.get("deny_patterns", []), pol.deny_patterns),
+            protected_account_ids=_merge(
+                [str(a) for a in raw.get("protected_account_ids", [])],
+                pol.protected_account_ids,
+            ),
+            require_confirmation_patterns=_merge(
+                raw.get("require_confirmation_patterns", []),
+                pol.require_confirmation_patterns,
+            ),
+            strict_protected_accounts=bool(raw.get("strict_protected_accounts", False))
+            or pol.strict_protected_accounts,
         )
+
+
+def _merge(user: list[str], managed: tuple[str, ...]) -> list[str]:
+    return list(dict.fromkeys([*user, *managed]))
 
 
 # Sensible built-in defaults on top of whatever the user configures —
