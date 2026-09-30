@@ -5,9 +5,9 @@ from __future__ import annotations
 
 import base64
 import hashlib
+import http.client
 import threading
 import time
-import urllib.request
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import pytest
@@ -65,8 +65,15 @@ def _browser(respond):
         q = {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
         seen.update(q)
         params = respond(q)
-        target = f"{q['redirect_uri']}?{urlencode(params)}"
-        threading.Thread(target=lambda: urllib.request.urlopen(target).read(), daemon=True).start()
+        redirect = urlparse(q["redirect_uri"])
+
+        def _call():
+            conn = http.client.HTTPConnection(redirect.hostname, redirect.port, timeout=5)
+            conn.request("GET", f"{redirect.path}?{urlencode(params)}")
+            conn.getresponse().read()
+            conn.close()
+
+        threading.Thread(target=_call, daemon=True).start()
         return True
 
     return _open, seen

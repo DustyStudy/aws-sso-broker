@@ -51,6 +51,8 @@ DEFAULT_REDACT_PATTERNS = [
     "*credential*",
 ]
 
+_SYSLOG_FACILITY = logging.handlers.SysLogHandler.LOG_AUTH
+
 # CloudWatch PutLogEvents takes at most 10,000 events / ~1 MB per call.
 _CLOUDWATCH_BATCH = 1000
 
@@ -210,9 +212,7 @@ def _emit(handler: logging.Handler, entry: dict) -> None:
 def _send_syslog(entry: dict) -> None:
     if sys.platform == "win32":
         raise RuntimeError("syslog isn't available on Windows; use 'eventlog' instead")
-    handler = logging.handlers.SysLogHandler(
-        address=_syslog_address(), facility=logging.handlers.SysLogHandler.LOG_AUTH
-    )
+    handler = logging.handlers.SysLogHandler(address=_syslog_address(), facility=_SYSLOG_FACILITY)
     _emit(handler, entry)
 
 

@@ -511,6 +511,8 @@ def creds_process(account: str, role: str | None):
         print(f"ssobroker: BLOCKED by guardrails: {e}", file=sys.stderr)
         sys.exit(2)
 
+    # Writing the credentials to stdout is the credential_process protocol:
+    # the calling AWS SDK/CLI reads them from this pipe. Nothing else is printed.
     print(json.dumps(payload))
 
 
