@@ -1,0 +1,6 @@
+# Tools for building a release. Compile with:
+#   uv pip compile requirements/release.in --universal --generate-hashes --python-version 3.11 -o requirements/release.txt
+build
+cyclonedx-bom
+setuptools>=68
+wheel

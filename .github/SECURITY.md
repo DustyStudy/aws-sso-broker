@@ -17,7 +17,8 @@ asking for a private channel and it'll be picked up from there.
 `ssobroker` handles short-lived AWS credentials. Areas that get the most
 scrutiny for security review:
 
-- `src/ssobroker/sso.py` — the device-authorization flow and token handling
+- `src/ssobroker/sso.py` — the sign-in flows (authorization code + PKCE, device code), server-side logout, and token handling
+- `src/ssobroker/policy.py` — the admin-managed policy and its trust checks
 - `src/ssobroker/cache.py` — where tokens and role credentials are persisted
   (OS keychain when available, 0600 local files otherwise)
 - `src/ssobroker/exec_cmd.py` — how credentials are exported into child
@@ -39,8 +40,10 @@ scrutiny for security review:
   the code and the README say so; please flag it if you find a place where
   the tool implies otherwise.
 - The local audit log (`~/.ssobroker/audit.log`) and any `--reason` text are
-  never transmitted anywhere by this tool except when you explicitly run
-  `ssobroker audit-log --push-cloudwatch`.
+  never transmitted anywhere by this tool unless you run
+  `ssobroker audit-log --push-cloudwatch` or configure `audit_forward` (in
+  orgs.yaml or the managed policy). Secret-looking arguments are redacted
+  before anything is written.
 
 ## CI/CD supply-chain hardening
 
