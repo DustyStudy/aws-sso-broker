@@ -163,7 +163,10 @@ purpose (`eval`-ing into the *current* shell, or feeding AWS tooling's
 `credential_process` protocol), not a leak. What they still guard against:
 `export_env_lines()` quotes every value before interpolating it into the
 printed `export KEY=value` / `$env:KEY = "value"` line (`shlex.quote()` on
-POSIX, backtick/`"`/`$` escaping on PowerShell), so a value containing a
+POSIX; on PowerShell, backtick-escaping of the backtick, `$`, `"` and the
+typographic quotes `“ ” „`, which PowerShell also treats as string
+delimiters. Hypothesis property tests in `tests/test_properties.py`
+check both for arbitrary input), so a value containing a
 shell metacharacter can't break out of its assignment when the caller
 `eval`s the output; `creds-process` writes human-readable errors and the
 login URL to stderr only, keeping stdout clean JSON for the AWS SDK/CLI to

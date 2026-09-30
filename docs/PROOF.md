@@ -81,10 +81,45 @@ Also worth knowing, but not bugs:
   read from a redirected `ProgramData`.
 - **`ca_bundle`, `https_proxy`, `use_fips_endpoint`** against a real proxy or
   FIPS endpoint.
-- **The release job** (attested wheel, sdist and SBOM). It runs when the next
-  release is published.
 - **Refresh up to the session cap in real time.** Expiry was forced by editing
   the cached expiry time, not by waiting an hour.
+
+### Follow-up: first attested release (v0.2.2)
+
+After this run was merged, release-please published v0.2.2 and the new
+release job attached four files. Each one verified against its signed
+build-provenance attestation, and a hash-locked install from them worked:
+
+```text
+$ gh attestation verify <file> --repo DustyStudy/aws-sso-broker
+aws-sso-broker.cdx.json                 verified  release-please.yml  refs/heads/main  afb6b53
+aws_sso_broker-0.2.2-py3-none-any.whl   verified  release-please.yml  refs/heads/main  afb6b53
+aws_sso_broker-0.2.2.tar.gz             verified  release-please.yml  refs/heads/main  afb6b53
+runtime-requirements.txt                verified  release-please.yml  refs/heads/main  afb6b53
+
+$ pip install --require-hashes -r runtime-requirements.txt
+$ pip install --no-deps aws_sso_broker-0.2.2-py3-none-any.whl
+$ ssobroker --version
+ssobroker, version 0.2.2
+```
+
+### Follow-up: property-based fuzzing found a PowerShell quoting bug
+
+Hypothesis property tests (`tests/test_properties.py`) generate arbitrary
+values and check that `export-env --powershell` output parses back to exactly
+that value. They found that PowerShell also ends a double-quoted string at
+the typographic quotes `“ ” „` (U+201C, U+201D, U+201E), which weren't
+escaped. Checked in real PowerShell 7 with the value
+`abc“; Write-Output INJECTED; “def`:
+
+| Quoting | Result |
+|---|---|
+| Before the fix | Variable got only `abc`; `Write-Output INJECTED` ran |
+| After the fix | Variable holds all 33 characters; nothing ran |
+
+AWS never returns credentials containing these characters, so no real
+credentials were at risk, but the quoting now holds for any value as the
+threat model says.
 
 ### Reproduce it
 
