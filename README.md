@@ -18,7 +18,7 @@ credentials and a local audit trail.
 Most teams either hand out long-lived IAM user keys (bad) or make people
 click through the AWS SSO web console and copy-paste temporary credentials
 by hand every hour (annoying). `ssobroker` automates the second option: it
-drives the same Identity Center device-authorization flow the console uses,
+drives the same Identity Center sign-in the AWS CLI uses,
 caches the resulting short-lived credentials locally, and exposes a simple
 CLI (`exec`, `shell`) for using them.
 
@@ -35,9 +35,11 @@ sequenceDiagram
     Op->>CLI: ssobroker exec -a prod -r read-only -- aws s3 ls
     CLI->>Cache: SSO token still valid and under max_session_hours?
     alt no valid token
-        CLI->>IdC: RegisterClient, StartDeviceAuthorization
-        IdC-->>Op: Browser approval page
-        CLI->>IdC: CreateToken (polls until approved)
+        CLI->>IdC: RegisterClient (cached ~90 days)
+        CLI-->>Op: Open browser: authorize (PKCE)
+        Op->>IdC: Sign in, MFA
+        IdC-->>CLI: Redirect to 127.0.0.1 with code
+        CLI->>IdC: CreateToken (code + PKCE verifier)
         CLI->>Cache: Store SSO token
     end
     CLI->>CLI: Check guardrails.yaml (protected accounts, deny and confirm patterns)
@@ -47,21 +49,25 @@ sequenceDiagram
     else allowed
         CLI->>IdC: GetRoleCredentials(account, role)
         IdC-->>CLI: Short-lived role credentials
-        CLI->>CLI: Append entry to audit.log
+        CLI->>CLI: Append redacted entry (with AccessKeyId) to audit.log, forward if configured
         CLI->>Child: Run command with credentials in its environment only
     end
 ```
 
 The broker never holds a long-lived key: the SSO token and role credentials
-both expire on their own, and `ssobroker logout` clears them early.
+both expire on their own, and `ssobroker logout` signs the session out at AWS
+and clears them early.
 [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) covers what the local
 guardrails do and do not protect against.
 
 ## Features
 
-- **SSO-only.** Uses the AWS SSO OIDC device-authorization grant, the same
-  flow the `aws sso login` CLI command uses. There is no code path that
-  accepts or stores a long-lived access key.
+- **SSO-only, phishing-resistant sign-in.** Uses the AWS SSO OIDC
+  authorization-code grant with PKCE and a `127.0.0.1` redirect, the same
+  flow `aws sso login` uses in AWS CLI v2.22+. Only a browser on the same
+  machine can finish the sign-in. The device-code flow is still there for
+  headless machines (`login --use-device-code`) and can be turned off by an
+  admin. There is no code path that accepts or stores a long-lived access key.
 - **Account/role registry** (`orgs.yaml`): give your accounts human-friendly
   aliases instead of memorizing 12-digit IDs.
 - **`ssobroker exec -a <account> -r <role> -- <command>`**: run a one-off AWS
@@ -74,12 +80,25 @@ guardrails do and do not protect against.
   "protected account" list to stop an obviously wrong command (or a
   fat-fingered wrong terminal tab) before it reaches AWS. This is a client-side
   speed bump, not a replacement for IAM permission boundaries or SCPs.
-- **Local audit log** (`~/.ssobroker/audit.log`): every `exec`/`shell` invocation
-  is appended as a JSON line: who, when, which account/role, what command.
-  Never uploaded anywhere; it's for your own review.
+- **Audit log** (`~/.ssobroker/audit.log`): every `exec`/`shell`/`export-env`
+  invocation, and every `creds-process` call that gets new credentials, is
+  appended as a JSON line: who, when, which account/role, what command, and
+  the temporary `AccessKeyId` (the join key to CloudTrail). Secret-looking
+  arguments (`--secret-string`, `--password=...`, `DB_PASSWORD=...`) are
+  redacted first. Local-only by default; `audit_forward` also sends each
+  entry to syslog, the Windows Event Log, or CloudWatch Logs.
 - **Nothing persisted insecurely.** Cached tokens/credentials live under
   `~/.ssobroker/cache` with owner-only permissions and their own expiry check on
-  every read.
+  every read. Cached role credentials are tied to the SSO session that
+  fetched them, are refreshed when under 5 minutes remain, and can be kept in
+  the OS keychain or not cached at all (`role_credential_cache`).
+- **Admin-managed policy** (`/etc/ssobroker/policy.yaml`,
+  `%ProgramData%\ssobroker\policy.yaml`): pin the allowed Identity Center
+  start URLs, cap session length, add guardrails, turn off device-code sign-in
+  and environment-variable overrides. It can only tighten a user's settings.
+  See [docs/ENTERPRISE.md](docs/ENTERPRISE.md).
+- **Corporate networks**: `ca_bundle`, `https_proxy` and `use_fips_endpoint`
+  in `orgs.yaml`.
 - **Native `credential_process` support** (`ssobroker creds-process`): wire it
   into `~/.aws/config` and `aws`/`terraform`/boto3 work with plain
   `--profile`, no wrapper needed.
@@ -91,8 +110,11 @@ guardrails do and do not protect against.
   resource policies (AWS exposes no simulator API for those).
 - **Shell completion**: `ssobroker completion bash|zsh|fish`.
 - **`ssobroker whoami`**: quick STS identity check for an account/role.
-- **CI on every push/PR**: ruff lint + format check, mypy, pytest across
-  Python 3.11/3.12.
+- **CI on every push/PR**: ruff lint + format check, mypy, pytest on
+  Linux, Windows and macOS across Python 3.11-3.13.
+- **Verifiable releases**: every release attaches the wheel, sdist, a
+  hash-locked `runtime-requirements.txt` and a CycloneDX SBOM, each with a
+  signed build-provenance attestation (`gh attestation verify`).
 - **Typed**: ships a `py.typed` marker; mypy-checked in CI.
 - **`ssobroker sync-aws-config`**: writes a `credential_process` profile into
   `~/.aws/config` for every account (or every account/role with
@@ -102,7 +124,8 @@ guardrails do and do not protect against.
   working backend (macOS Keychain, Windows Credential Manager, Secret
   Service/KWallet), the SSO token itself is stored there instead of a plain
   file. Falls back to the existing 0600-file cache automatically when no
-  backend is available.
+  backend is available. `role_credential_cache: keyring` puts role
+  credentials there too (and caches nothing if no keychain is available).
 - **`--json` output** on `accounts`, `list-remote`, and `audit-log`: for
   piping into `jq` or other tooling.
 - **`ssobroker export-env`**: prints `export AWS_...` (or `--powershell`
@@ -113,6 +136,21 @@ guardrails do and do not protect against.
   credentials have left, and a warning if it's under 15 minutes.
 
 ## Install
+
+### Verified release (recommended for organizations)
+
+Download the wheel and `runtime-requirements.txt` from the
+[latest release](https://github.com/DustyStudy/aws-sso-broker/releases/latest), then:
+
+```bash
+gh attestation verify aws_sso_broker-*.whl --repo DustyStudy/aws-sso-broker
+python3 -m pip install --require-hashes -r runtime-requirements.txt
+python3 -m pip install --no-deps aws_sso_broker-*.whl
+```
+
+See [docs/ENTERPRISE.md](docs/ENTERPRISE.md) for fleet rollout.
+
+### From source
 
 ```bash
 git clone https://github.com/DustyStudy/aws-sso-broker.git
@@ -178,8 +216,10 @@ $EDITOR ~/.ssobroker/orgs.yaml   # add your SSO start URL + account IDs/roles
 # 2. Sanity-check everything
 ssobroker doctor
 
-# 3. Log in (opens your browser for Identity Center approval)
+# 3. Log in (opens your browser to sign in to Identity Center)
 ssobroker login
+#    On a machine with no local browser:
+ssobroker login --use-device-code
 
 # 4. See what's in your registry
 ssobroker accounts
@@ -219,10 +259,13 @@ ssobroker shell -a prod -r admin --reason "JIRA-1234"
 ssobroker exec -a prod -r deploy --check-action s3:DeleteObject --check-resource "arn:aws:s3:::my-bucket/*" -- ./destroy.sh
 ssobroker check-policy -a prod -r deploy --action s3:DeleteObject --resource "arn:aws:s3:::my-bucket/*"
 
-# Push recent audit-log entries to CloudWatch Logs (requires
-# cloudwatch_log_group set in orgs.yaml and logs:PutLogEvents on whatever
-# credentials are active in this shell)
+# Push audit-log entries not yet sent to CloudWatch Logs (requires
+# cloudwatch_log_group in orgs.yaml; uses the cloudwatch_account/role logging
+# role if set, else whatever credentials are active in this shell)
 ssobroker audit-log --push-cloudwatch
+
+# Sign out at AWS and clear every cached token and credential
+ssobroker logout
 
 # One-time setup: write a credential_process profile into ~/.aws/config
 # for every account (one per account by default; --all-roles for one
@@ -279,11 +322,15 @@ account IDs and role names. Two optional top-level fields:
 
 - `max_session_hours` (default 8): force a fresh browser login after this
   many hours, independent of the SSO token's own server-side expiry.
-- `cloudwatch_log_group`: set this to enable `ssobroker audit-log --push-cloudwatch`.
-  Each push resends the last `n` local entries with no "since last push"
-  tracking, so calling it repeatedly with overlapping history produces
-  duplicate CloudWatch events: push right after each command, or dedupe
-  downstream, if that matters for your use case.
+- `cloudwatch_log_group`: set this to enable `ssobroker audit-log --push-cloudwatch`
+  and `audit_forward: [cloudwatch]`. A cursor file next to the log remembers
+  what was already sent, so each entry is pushed once (two processes pushing
+  at the same moment can still both send an entry).
+
+Other optional settings, all shown in the example file: `login_flow`,
+`role_credential_cache`, `audit_redact_flags`, `audit_forward`,
+`cloudwatch_account`/`cloudwatch_role`, `ca_bundle`, `https_proxy` and
+`use_fips_endpoint`.
 
 ### `~/.ssobroker/guardrails.yaml` (optional)
 
@@ -292,6 +339,11 @@ you mark accounts as protected (block all ad-hoc commands) and add
 deny/require-confirmation glob patterns on top of the built-in defaults
 (blocks things like `organizations leave-organization`, `close-account`,
 recursive `s3 rm`, etc.).
+
+### Managed policy (optional, for admins)
+
+See [`config/policy.example.yaml`](config/policy.example.yaml) and
+[docs/ENTERPRISE.md](docs/ENTERPRISE.md).
 
 ## Security model
 
@@ -303,13 +355,34 @@ recursive `s3 rm`, etc.).
   deliberate exceptions: printing credentials to stdout (for `eval` into
   your *current* shell, or for AWS tooling's `credential_process` protocol)
   is their whole point, not a leak; see the notes on them above.
-- `ssobroker logout` clears every cached token/credential immediately.
+- `ssobroker logout` signs the SSO session out at AWS and clears every
+  cached token/credential immediately.
+- Cached role credentials are only reused under the SSO session that fetched
+  them, so a re-login, logout or different Identity Center instance never
+  gets old credentials back.
 - Guardrails and the audit log are local-only conveniences, not a substitute
   for IAM permission boundaries, SCPs, or CloudTrail.
 
 See [`docs/THREAT_MODEL.md`](docs/THREAT_MODEL.md) for the full breakdown:
 assets, trust boundaries, per-scenario mitigations and residual risk, and
 what's explicitly out of scope.
+
+## Why not `aws configure sso`, aws-vault or Granted?
+
+Use them if they cover what you need. The AWS CLI's own SSO support handles
+sign-in and profiles well. `ssobroker` adds a few things around that:
+
+- **Guardrails before the call leaves the machine**: protected accounts and
+  deny/confirm patterns, which catch the wrong-terminal-tab mistake.
+- **An audit trail tied to CloudTrail**: every credential use is logged with
+  its temporary `AccessKeyId`, redacted, and optionally forwarded to your SIEM.
+- **Admin-managed policy**: a security team can pin start URLs, turn off
+  device-code sign-in and enforce guardrails on every endpoint.
+- **Safe `~/.aws/config` generation**: `sync-aws-config` writes one
+  `credential_process` profile per account/role from a single registry
+  without touching anything it didn't create.
+
+None of these replace IAM, SCPs or CloudTrail; see the security model above.
 
 ## Proof
 

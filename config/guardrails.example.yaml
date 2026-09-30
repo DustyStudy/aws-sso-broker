@@ -8,10 +8,14 @@
 # Does NOT cover `export-env` or `creds-process` — those are meant to work
 # non-interactively (wired into ~/.aws/config, a script, or CI), so blocking
 # them here would just break that use case rather than add friction to it.
-# If a protected account must never be reachable through ssobroker at all,
-# don't add it to orgs.yaml (or don't wire creds-process for it).
+# Set strict_protected_accounts: true (below) to block them there too.
 protected_account_ids:
   - "111111111111"
+
+# Also refuse protected accounts in `export-env` and `creds-process`. With this
+# on, `aws --profile <protected>` fails instead of quietly getting credentials.
+# An admin-managed policy can force this on; this file can't turn it off then.
+# strict_protected_accounts: true
 
 # Glob patterns (fnmatch-style) matched against the full joined command string.
 # Anything matching here is blocked, in addition to the tool's built-in defaults

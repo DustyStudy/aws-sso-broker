@@ -8,13 +8,30 @@ from __future__ import annotations
 
 import os
 import shlex
+import shutil
 import subprocess
 import sys
 import time
 
 from . import audit, guardrails
 from .config import Account, OrgConfig, resolve_account, resolve_role
-from .sso import SsoToken, get_role_credentials
+from .sso import SsoToken, fetch_role_credentials, get_role_credentials
+
+# Other ways an AWS SDK could pick up credentials or a role from the parent
+# shell. The explicit keys set below normally win, but removing these makes
+# sure nothing else is mixed in.
+_STRIP_ENV = (
+    "AWS_PROFILE",
+    "AWS_DEFAULT_PROFILE",
+    "AWS_ROLE_ARN",
+    "AWS_ROLE_SESSION_NAME",
+    "AWS_WEB_IDENTITY_TOKEN_FILE",
+    "AWS_CONTAINER_CREDENTIALS_RELATIVE_URI",
+    "AWS_CONTAINER_CREDENTIALS_FULL_URI",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN",
+    "AWS_CONTAINER_AUTHORIZATION_TOKEN_FILE",
+    "AWS_CREDENTIAL_EXPIRATION",
+)
 
 
 def _creds_to_env(creds: dict, region: str) -> dict:
@@ -25,8 +42,44 @@ def _creds_to_env(creds: dict, region: str) -> dict:
     env["AWS_DEFAULT_REGION"] = region
     env["AWS_REGION"] = region
     # Never inherit a long-lived profile/key from the parent shell by accident.
-    env.pop("AWS_PROFILE", None)
+    for name in _STRIP_ENV:
+        env.pop(name, None)
     return env
+
+
+def _default_shell(env: dict) -> str:
+    """SSOBROKER_SHELL if set; otherwise $SHELL on POSIX, and PowerShell 7
+    (then Windows PowerShell, then %COMSPEC%) on Windows."""
+    if env.get("SSOBROKER_SHELL"):
+        return env["SSOBROKER_SHELL"]
+    if os.name != "nt":
+        return env.get("SHELL", "/bin/bash")
+    return shutil.which("pwsh") or shutil.which("powershell") or env.get("COMSPEC", "cmd.exe")
+
+
+def enforce_strict_protected(
+    account: Account,
+    resolved_role: str,
+    gcfg: guardrails.GuardrailConfig,
+    *,
+    action: str,
+    reason: str | None = None,
+) -> None:
+    """Refuse a protected account on paths that aren't `exec`/`shell` when
+    `strict_protected_accounts` is on. Raises GuardrailBlocked."""
+    if not gcfg.strict_protected_accounts:
+        return
+    block_reason = guardrails.check_protected_account(account.account_id, gcfg)
+    if block_reason:
+        audit.record(
+            action=action,
+            account_id=account.account_id,
+            role=resolved_role,
+            result="blocked",
+            detail=block_reason,
+            reason=reason,
+        )
+        raise guardrails.GuardrailBlocked(block_reason, "protected_account_ids")
 
 
 def run(
@@ -113,6 +166,7 @@ def run(
         role=resolved_role,
         command=command,
         reason=reason,
+        access_key_id=creds["AccessKeyId"],
     )
 
     proc = subprocess.run(command, env=env)
@@ -152,13 +206,19 @@ def spawn_shell(
     creds = get_role_credentials(sso_token, account.account_id, resolved_role)
     env = _creds_to_env(creds, region or cfg.default_region)
 
-    shell = env.get("SHELL", "/bin/bash" if os.name != "nt" else "cmd.exe")
+    shell = _default_shell(env)
     prompt_tag = f"[{account.alias}:{resolved_role}]"
     env["SSOBROKER_ACTIVE_CONTEXT"] = prompt_tag
     if os.name != "nt":
         env.setdefault("PS1", f"{prompt_tag} $ ")
 
-    audit.record(action="shell", account_id=account.account_id, role=resolved_role, reason=reason)
+    audit.record(
+        action="shell",
+        account_id=account.account_id,
+        role=resolved_role,
+        reason=reason,
+        access_key_id=creds["AccessKeyId"],
+    )
 
     minutes_left = (creds["Expiration"] / 1000.0 - time.time()) / 60.0
     print(f"Spawning subshell as {prompt_tag} — type 'exit' to return.")
@@ -182,6 +242,7 @@ def export_env_lines(
     role: str | None,
     region: str | None = None,
     *,
+    gcfg: guardrails.GuardrailConfig | None = None,
     powershell: bool = False,
     reason: str | None = None,
 ) -> str:
@@ -192,11 +253,17 @@ def export_env_lines(
     """
     account = resolve_account(cfg, account_alias_or_id)
     resolved_role = resolve_role(account, role)
+    gcfg = gcfg or guardrails.GuardrailConfig.load()
+    enforce_strict_protected(account, resolved_role, gcfg, action="export-env", reason=reason)
     creds = get_role_credentials(sso_token, account.account_id, resolved_role)
     resolved_region = region or cfg.default_region
 
     audit.record(
-        action="export-env", account_id=account.account_id, role=resolved_role, reason=reason
+        action="export-env",
+        account_id=account.account_id,
+        role=resolved_role,
+        reason=reason,
+        access_key_id=creds["AccessKeyId"],
     )
 
     pairs = [
@@ -219,3 +286,39 @@ def _powershell_quote(value: str) -> str:
     shlex.quote() for the POSIX side above."""
     escaped = value.replace("`", "``").replace('"', '`"').replace("$", "`$")
     return f'"{escaped}"'
+
+
+def credential_process_payload(
+    cfg: OrgConfig,
+    sso_token: SsoToken,
+    account_alias_or_id: str,
+    role: str | None,
+    *,
+    gcfg: guardrails.GuardrailConfig | None = None,
+) -> dict:
+    """The JSON document the AWS `credential_process` protocol expects.
+
+    Writes an audit entry only when AWS issued new credentials, not on a
+    cache hit, so wiring this into ~/.aws/config doesn't flood the log."""
+    import datetime
+
+    account = resolve_account(cfg, account_alias_or_id)
+    resolved_role = resolve_role(account, role)
+    gcfg = gcfg or guardrails.GuardrailConfig.load()
+    enforce_strict_protected(account, resolved_role, gcfg, action="creds-process")
+    creds, fresh = fetch_role_credentials(sso_token, account.account_id, resolved_role)
+    if fresh:
+        audit.record(
+            action="creds-process",
+            account_id=account.account_id,
+            role=resolved_role,
+            access_key_id=creds["AccessKeyId"],
+        )
+    expiration = datetime.datetime.fromtimestamp(creds["Expiration"] / 1000.0, tz=datetime.UTC)
+    return {
+        "Version": 1,
+        "AccessKeyId": creds["AccessKeyId"],
+        "SecretAccessKey": creds["SecretAccessKey"],
+        "SessionToken": creds["SessionToken"],
+        "Expiration": expiration.strftime("%Y-%m-%dT%H:%M:%SZ"),
+    }

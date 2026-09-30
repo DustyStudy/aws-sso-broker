@@ -11,11 +11,42 @@ default_region: us-east-1                     # default region for `exec`/`shell
 # defaults to 8.
 max_session_hours: 8
 
-# Optional: push audit-log entries to this CloudWatch Logs log group when you
-# run `ssobroker audit-log --push-cloudwatch`. Requires logs:PutLogEvents on
-# whatever role you're using to push (usually a separate low-privilege one,
-# not the account roles below). Leave unset to keep the audit log local-only.
+# How `login` signs in. auth_code (default) opens a browser on this machine
+# and receives the result on a 127.0.0.1 redirect (authorization code + PKCE).
+# device_code prints a URL you can approve from any device; use it only on
+# machines with no local browser (or run `ssobroker login --use-device-code`).
+# login_flow: auth_code
+
+# Where short-lived role credentials are cached between commands:
+#   file    - 0600 file under ~/.ssobroker/cache (default)
+#   keyring - OS keychain; if no keychain is available, nothing is cached
+#   none    - never cached; every command asks AWS for new credentials
+# role_credential_cache: file
+
+# Extra flag/variable name patterns (fnmatch, case-insensitive) whose values
+# are replaced with ***REDACTED*** in the audit log. Built in: *secret*,
+# *password*, *passwd*, *token*, *private-key*, *api-key*, *credential*.
+# audit_redact_flags: ["*pin*"]
+
+# Send each audit entry somewhere besides the local file, as it is written:
+#   syslog     - local syslog, facility auth (Linux/macOS)
+#   eventlog   - Windows Application event log (needs the `windows` extra)
+#   cloudwatch - cloudwatch_log_group below
+# audit_forward: [syslog]
+
+# CloudWatch Logs group for `audit_forward: [cloudwatch]` and for
+# `ssobroker audit-log --push-cloudwatch`. The group must already exist.
 # cloudwatch_log_group: /ssobroker/audit
+# Account (alias or ID from `accounts` below) and role used to write to it:
+# ideally a role that only has logs:CreateLogStream/PutLogEvents on the group.
+# Leave both unset to use whatever credentials are active in your shell.
+# cloudwatch_account: logging
+# cloudwatch_role: AuditLogWriter
+
+# Corporate network settings. A value already set in the environment wins.
+# ca_bundle: ~/corp-root-ca.pem        # sets AWS_CA_BUNDLE (TLS-inspecting proxy)
+# https_proxy: http://proxy.corp:8080  # sets HTTPS_PROXY
+# use_fips_endpoint: true              # sets AWS_USE_FIPS_ENDPOINT
 
 accounts:
   management:
