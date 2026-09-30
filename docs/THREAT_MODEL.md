@@ -21,7 +21,7 @@ What this tool has custody of, at some point, and what protecting it means:
 
 | Asset | Where it lives | What "protected" means |
 |---|---|---|
-| SSO access token | OS keychain (preferred) or `~/.ssobroker/` cache file (fallback) | Not written to disk in plaintext when a keychain is available; 0600 permissions and expiry-checked reads when it isn't |
+| SSO access token and refresh token | OS keychain (preferred) or `~/.ssobroker/` cache file (fallback) | Not written to disk in plaintext when a keychain is available; 0600 permissions and expiry-checked reads when it isn't |
 | Short-lived role credentials (`AccessKeyId`/`SecretAccessKey`/`SessionToken`) | Same cache, keyed per account+role | Same as above, plus never exported outside the one child process/shell that requested them — except via `export-env`/`creds-process`, whose whole purpose is printing them to stdout for the caller's own use (see scenario 4) |
 | `orgs.yaml` (account registry) | `~/.ssobroker/orgs.yaml` (or `SSOBROKER_CONFIG`) | Contains account IDs and role names only — no secrets — but is still the map an attacker would want to see, and its contents drive which guardrails apply |
 | `guardrails.yaml` | `~/.ssobroker/guardrails.yaml` (or `SSOBROKER_GUARDRAILS`) | Governs which commands get blocked/confirmed — its integrity matters more than its confidentiality |
@@ -73,9 +73,11 @@ account, same role, until expiry. This is inherent to any tool that caches
 credentials locally at all, not something a config change in `ssobroker`
 fixes; it's why `max_session_hours` exists (force re-auth sooner than AWS's
 own token expiry) and why `ssobroker logout` clearing the cache immediately is
-part of the documented incident-response step. `logout` also calls the SSO
-portal's `Logout` API, so the stolen SSO token stops working at AWS, not
-just locally. Role credentials already issued stay valid until they expire;
+part of the documented incident-response step. The cached refresh token
+only works until `max_session_hours` after the original sign-in and while
+the Identity Center session is valid. `logout` also calls the SSO
+portal's `Logout` API, so the stolen SSO access and refresh tokens stop
+working at AWS, not just locally. Role credentials already issued stay valid until they expire;
 `role_credential_cache: keyring` (or `none`) keeps them off disk, and cached
 ones are only reused under the SSO session that fetched them.
 

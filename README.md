@@ -386,10 +386,14 @@ None of these replace IAM, SCPs or CloudTrail; see the security model above.
 
 ## Proof
 
-Run for real against a real IAM Identity Center instance: login, both
-guardrail types, audit logging, `sync-aws-config`, and `logout` all
-verified against AWS's own responses. Unlike this tool's earlier fix
-rounds, this pass found nothing broken. See [`docs/PROOF.md`](docs/PROOF.md).
+Run for real against a real IAM Identity Center instance, twice, and
+verified against AWS's own responses. The first run covered credentials,
+guardrails, audit logging, `sync-aws-config` and logout, and found nothing.
+The second covered the corporate hardening: PKCE sign-in, server-side logout
+(the old token is rejected by AWS afterwards), the managed policy, redaction,
+CloudWatch forwarding, and finding the audit log's `access_key_id` in
+CloudTrail. It found that users would have had to sign in every hour, which
+was fixed before release. See [`docs/PROOF.md`](docs/PROOF.md).
 
 ## Development
 
