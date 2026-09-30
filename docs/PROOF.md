@@ -1,5 +1,119 @@
 # Proof that ssobroker works
 
+Two live runs against a real AWS Organization's real IAM Identity Center
+instance. Account IDs, the SSO user and access keys are masked in the text
+and in the evidence files under [`proof/`](proof/).
+
+- [Run 2 (2026-09-30)](#run-2-2026-09-30-corporate-hardening): the corporate
+  hardening from PR #9: PKCE sign-in, server-side logout, managed policy,
+  audit redaction and forwarding, CloudTrail join. **Found one real problem**
+  (hourly re-login) and fixed it in the same PR as this proof.
+- [Run 1 (2026-09-23)](#run-1-2026-09-23-core-behavior): core behavior:
+  credentials, guardrails, audit log, `sync-aws-config`, logout. Found nothing.
+
+## Run 2 (2026-09-30): corporate hardening
+
+Run from `main` at `b0db996` (PR #9) plus the refresh-token fix on this
+branch, on Windows 11 with Python 3.12. `SSOBROKER_HOME` pointed at a
+throwaway directory. `ProgramData` pointed at another throwaway directory, so
+the managed policy was read through its real Windows code path
+(`%ProgramData%\ssobroker\policy.yaml`) without writing to the machine.
+
+| | |
+|---|---|
+| **Identity Center** | Real instance in us-east-2, signed in through the browser with MFA (three times: first run, after the fix, and for cleanup) |
+| **Accounts** | Management account (marked protected, `strict_protected_accounts: true`) and one member ("dev") account, `AdministratorAccess` on both |
+| **Evidence** | [`2026-09-30-hardening-checks.json`](proof/2026-09-30-hardening-checks.json), [`2026-09-30-audit-log.json`](proof/2026-09-30-audit-log.json) (the full local audit log from the run) |
+
+### Claims and evidence
+
+| # | Claim | Result | How it was checked |
+|---|---|---|---|
+| 1 | `login` signs in with the authorization-code grant + PKCE on a `127.0.0.1` redirect | **Proven** | Authorize URL used `code_challenge_method=S256` and `redirect_uri=http://127.0.0.1:<port>/oauth/callback`; AWS's `CreateToken` accepted the verifier and returned a token |
+| 2 | The OIDC client registration is cached, not repeated on every login | **Proven** | `sso-client_…_auth_code.json` written with a ~90-day lifetime |
+| 3 | An expired access token is refreshed without a browser, but the session cap still counts from the original sign-in | **Proven (after fix)** | Access token marked expired on disk; `whoami` then succeeded with a different access token, no browser, `issuedAt` unchanged |
+| 4 | `logout` signs the session out at AWS, not just locally | **Proven** | The saved access token listed 3 accounts before logout and got `UnauthorizedException: Session token not found or invalid` after; the saved refresh token got `InvalidGrantException` |
+| 5 | `creds-process` is audited when it gets new credentials, and only then | **Proven** | Two calls: one audit entry (fresh), none for the cache hit |
+| 6 | `strict_protected_accounts` blocks `creds-process` and `export-env`, not just `exec`/`shell` | **Proven** | All three exited 2 against the management account and were audited as `blocked`; no credentials printed |
+| 7 | Secret-looking arguments are redacted before they're written | **Proven** | `env DB_PASSWORD=not-a-real-secret …` logged as `DB_PASSWORD=***REDACTED***`; a managed-policy pattern (`*user-name*`) redacted `--user-name` |
+| 8 | The audit log's `access_key_id` finds the matching CloudTrail events | **Proven** | `aws cloudtrail lookup-events` by that key returned exactly the calls made with it (`GetCallerIdentity`, `GetAccountSummary`, `GetCallerIdentity`) |
+| 9 | CloudWatch forwarding sends every entry once, and a forwarding failure never blocks the command | **Proven** | Before the log group existed: stderr warning, command still ran. After: 13 local lines = 13 CloudWatch events, all unique; two `--push-cloudwatch` runs pushed 0 new entries |
+| 10 | The managed policy pins start URLs, fails closed on unknown keys, and turns off device code | **Proven** | Wrong URL: config error. Same URL with different case and trailing slash: accepted. `alow_device_code` typo: exit 1. `login --use-device-code`: refused |
+| 11 | The managed policy can switch off `SSOBROKER_*` overrides | **Proven** | With `ignore_env_overrides: true`, `doctor` ignored `SSOBROKER_HOME` and read the real `~/.ssobroker/orgs.yaml` instead (read-only) |
+| 12 | Policy settings only tighten | **Proven** | `max_session_hours` 8 (user) / 4 (policy) became 4; policy `deny_patterns` blocked `aws iam create-user`; `role_credential_cache: none` left 0 role-credential files on disk |
+
+### What running it for real found
+
+**Users would have had to sign in every hour.** With the authorization-code
+grant, Identity Center issues a 1-hour access token plus a refresh token
+(the device-code grant ssobroker used before got one token lasting about
+8 hours). PR #9 deliberately dropped the refresh token, so every
+command after the first hour would have opened a browser. The unit tests
+couldn't catch this because the fake returned whatever lifetime it was given.
+
+Fixed in the same PR as this proof: the refresh token is stored with the
+access token (OS keychain when available, 0600 file otherwise). An expired
+access token is refreshed silently, but only until `max_session_hours` after
+the original sign-in, and only while the Identity Center session is still
+valid. Claims 3 and 4 were run after the fix, including proof that `logout`
+revokes the refresh token too.
+
+Also worth knowing, but not bugs:
+
+- `result: "ok"` in the audit log means "allowed and started", not "the
+  command succeeded". The run's first `aws logs create-log-group` failed
+  inside the AWS CLI and is still logged `ok`. Use CloudTrail for what
+  actually happened in AWS.
+- On Windows, Git Bash rewrites arguments that look like POSIX paths
+  (`/ssobroker/proof` became `C:/Program Files/Git/ssobroker/proof`), which
+  is visible in one audit entry. That is Git Bash, not ssobroker; set
+  `MSYS_NO_PATHCONV=1` or use PowerShell.
+
+### What this run does not prove
+
+- **The OS keychain backend.** The `keyring` extra wasn't installed, so
+  tokens used the 0600-file cache. It was skipped deliberately: the keychain
+  entry name is shared with any real ssobroker install on the same machine.
+- **syslog and Windows Event Log forwarding.** Only CloudWatch was run live.
+- **The POSIX root-ownership check on `/etc/ssobroker/policy.yaml`.** This run
+  was on Windows; the check is covered by unit tests on Linux and macOS CI.
+- **A real Windows folder ACL on `%ProgramData%\ssobroker`.** The policy was
+  read from a redirected `ProgramData`.
+- **`ca_bundle`, `https_proxy`, `use_fips_endpoint`** against a real proxy or
+  FIPS endpoint.
+- **The release job** (attested wheel, sdist and SBOM). It runs when the next
+  release is published.
+- **Refresh up to the session cap in real time.** Expiry was forced by editing
+  the cached expiry time, not by waiting an hour.
+
+### Reproduce it
+
+1. Install from a clone: `pip install -e .`.
+2. Point `SSOBROKER_HOME` at an empty directory and write an `orgs.yaml` with
+   your start URL and two accounts; add a `guardrails.yaml` with one account
+   in `protected_account_ids` and `strict_protected_accounts: true`.
+3. `ssobroker login`: approve in the browser. Check that `cache/` has an
+   `sso-client_…_auth_code.json` and that the token entry has a
+   `refreshToken`.
+4. `ssobroker creds-process -a <dev>` twice, then `ssobroker audit-log`: one
+   entry. Try `creds-process`, `export-env` and `exec` against the protected
+   account: exit 2 each time.
+5. `ssobroker exec -a <dev> -- env DB_PASSWORD=x aws sts get-caller-identity`,
+   then look at `audit.log`.
+6. After ~5-15 minutes, `aws cloudtrail lookup-events --lookup-attributes
+   AttributeKey=AccessKeyId,AttributeValue=<access_key_id from audit.log>`.
+7. Managed policy: on Windows set `ProgramData` to a scratch directory (or
+   use the real `%ProgramData%\ssobroker\policy.yaml` / `/etc/ssobroker/policy.yaml`)
+   and try the settings in [`config/policy.example.yaml`](../config/policy.example.yaml).
+8. CloudWatch: create a log group, set `audit_forward: [cloudwatch]` and
+   `cloudwatch_log_group`, run a few commands, and compare
+   `aws logs filter-log-events` with `audit.log`.
+9. Save the cached access token, run `ssobroker logout`, then
+   `aws sso list-accounts --access-token <saved token>`: expect
+   `UnauthorizedException`.
+
+## Run 1 (2026-09-23): core behavior
+
 Run for real on **2026-09-23** against a real AWS Organization's real IAM
 Identity Center instance - two real accounts, real device-authorization
 logins, real ephemeral STS credentials, and every guardrail outcome
@@ -19,7 +133,7 @@ fixed" narrative where there wasn't one - ssobroker has already been through
 several rounds of real fixes (see `CHANGELOG.md` and the merged `fix/*`
 PRs), and this run didn't surface a new one.
 
-## What was tested
+### What was tested
 
 | | |
 |---|---|
@@ -27,7 +141,7 @@ PRs), and this run didn't surface a new one.
 | **Identity Center** | Real `sso_start_url`, real device-authorization grant, approved via an already-authenticated browser session from earlier in the session |
 | **Config** | `~/.ssobroker/orgs.yaml` with both real accounts; `~/.ssobroker/guardrails.yaml` with the management account marked `protected_account_ids`, a `deny_patterns` entry, and a `require_confirmation_patterns` entry |
 
-## 1. Claims and evidence
+### 1. Claims and evidence
 
 | # | Claim | Result | Evidence |
 |---|---|---|---|
@@ -43,7 +157,7 @@ PRs), and this run didn't surface a new one.
 | 10 | A `sync-aws-config`-written `credential_process` profile works with plain `aws` CLI, no `ssobroker` wrapper needed | **Proven** | `aws sts get-caller-identity --profile dev` / `--profile management` both succeeded, matching `ssobroker whoami`'s output exactly |
 | 11 | `logout` actually clears cached credentials, not just claims to | **Proven** | Cache directory empty after; next command transparently re-triggered a fresh device-authorization login rather than silently reusing anything |
 
-## 2. What running it for real found
+### 2. What running it for real found
 
 Nothing. No bug, no gap between documented and actual behavior, across 11
 claims spanning credential issuance, all three guardrail mechanisms, audit
@@ -53,7 +167,7 @@ each of which is exactly the kind of thing that tends to silently not work
 (a guardrail that logs but doesn't block, a confirmation prompt that's
 cosmetic, a config sync that clobbers what it shouldn't).
 
-## 3. What this does not prove
+### 3. What this does not prove
 
 - **The OS keychain backend for SSO tokens** (the `keyring` extra). This run used the default file-based cache (0600 permissions), not a real macOS Keychain/Windows Credential Manager/Secret Service backend.
 - **Multiple AWS Organizations from one registry.** Tested with one org, two accounts.
@@ -64,7 +178,7 @@ cosmetic, a config sync that clobbers what it shouldn't).
 - **The session-expiry warning and `max_session_hours` cap.** Not exercised - would need a session actually approaching either limit, which a short test run doesn't reach.
 - **Attempting to bypass guardrails deliberately** (e.g. constructing a command that's semantically equivalent to a denied pattern but doesn't match the glob). The guardrails file's own header says this is a speed bump, not a security boundary, and this run didn't try to defeat it - only confirmed it works for the straightforward case.
 
-## 4. Reproduce it
+### 4. Reproduce it
 
 Prerequisites: an AWS Organization with IAM Identity Center, at least one
 member account you have a permission set on, and a management account you

@@ -1,0 +1,76 @@
+{
+  "note": "Live run of the corporate-hardening release (main at b0db996, PR #9, plus the refresh-token fix on this branch) against a real IAM Identity Center instance. Windows 11, Python 3.12, boto3 1.43.104, aws-cli 2.37.4. SSOBROKER_HOME pointed at a throwaway directory; ProgramData pointed at a throwaway directory so the real managed-policy code path ran without writing to the machine. Account IDs, the SSO user and access keys are masked. Every result below comes from AWS's own responses or files on disk, not from ssobroker's own output alone.",
+  "identity_center": {
+    "start_url": "https://d-xxxxxxxxxx.awsapps.com/start",
+    "sso_region": "us-east-2"
+  },
+  "login_auth_code_pkce": {
+    "authorize_url": "https://oidc.us-east-2.amazonaws.com/authorize?response_type=code&client_id=<redacted>&redirect_uri=http%3A%2F%2F127.0.0.1%3A53898%2Foauth%2Fcallback&state=<redacted>&code_challenge_method=S256&scopes=sso%3Aaccount%3Aaccess&code_challenge=<redacted>",
+    "result": "Signed in through the browser; the loopback listener received the code, CreateToken accepted the PKCE verifier.",
+    "client_registration_cache": "sso-client_us-east-2_<digest>_auth_code.json written with clientId/clientSecret, kept ~2159 h (90 days minus a 1 h margin).",
+    "access_token_lifetime": "1 hour. AWS returns a refresh token with this grant; see refresh_token below."
+  },
+  "refresh_token": {
+    "finding": "PR #9 dropped the refresh token, so with the 1-hour access token users would have had to sign in again every hour. Fixed on this branch: the refresh token is cached next to the access token and used until max_session_hours.",
+    "cache_entry_after_sign_in": {
+      "has_refresh_token": true,
+      "access_expires_in_min": 60,
+      "entry_kept_for_h": 8.0
+    },
+    "forced_expiry_then_whoami": {
+      "access_token_sha256_12_before": "3910c94837bf",
+      "access_token_sha256_12_after": "3a0a3dba9368",
+      "browser_opened": false,
+      "issuedAt_unchanged": true,
+      "whoami_account": "<dev-account>"
+    }
+  },
+  "role_credentials": {
+    "creds_process_first_call": "fresh credentials (ASIA…VU4S), one audit entry",
+    "creds_process_second_call": "cache hit, no audit entry",
+    "role_credential_cache_none": "two whoami calls with the policy requiring 'none': 0 role-creds files on disk afterwards"
+  },
+  "strict_protected_accounts": {
+    "creds_process_management": "exit 2, 'BLOCKED by guardrails', audited as blocked, no credentials printed",
+    "export_env_management": "exit 2, audited as blocked",
+    "exec_management": "exit 2, audited as blocked"
+  },
+  "audit_redaction": {
+    "command": "ssobroker exec -a dev -- env DB_PASSWORD=not-a-real-secret aws sts get-caller-identity",
+    "logged_as": ["env", "DB_PASSWORD=***REDACTED***", "aws", "sts", "get-caller-identity", "..."],
+    "policy_pattern": "audit_redact_flags ['*user-name*'] from the managed policy redacted --user-name on a blocked 'aws iam create-user'"
+  },
+  "cloudtrail_join": {
+    "lookup": "aws cloudtrail lookup-events --lookup-attributes AttributeKey=AccessKeyId,AttributeValue=<access_key_id from audit.log>",
+    "events_returned": [
+      ["2026-09-30T21:31:20Z", "GetCallerIdentity", "sts.amazonaws.com", "<sso-user>"],
+      ["2026-09-30T21:31:27Z", "GetAccountSummary", "iam.amazonaws.com", "<sso-user>"],
+      ["2026-09-30T21:31:28Z", "GetCallerIdentity", "sts.amazonaws.com", "<sso-user>"]
+    ],
+    "matches_audit_log": "The same key appears on the creds-process, get-account-summary and redacted get-caller-identity entries in 2026-09-30-audit-log.json. The first GetCallerIdentity is the whoami check, which ssobroker doesn't audit."
+  },
+  "cloudwatch_forwarding": {
+    "setup": "Temporary log group /ssobroker/proof in <dev-account>, 1-day retention, written with the registry's dev/AdministratorAccess role via cloudwatch_account/cloudwatch_role. Deleted afterwards.",
+    "forward_before_group_existed": "stderr warning 'audit forwarding: cloudwatch failed: ResourceNotFoundException', command still ran",
+    "backfill": "the next audit write pushed every pending entry",
+    "push_cloudwatch_twice": "'Pushed 0 new entries' both times (cursor)",
+    "comparison": {"local_lines": 13, "cloudwatch_events": 13, "unique_events": 13, "identical": true}
+  },
+  "managed_policy": {
+    "allowlist_mismatch": "Config error: sso_start_url ... is not allowed by the managed policy",
+    "allowlist_match_ignores_case_and_slash": "HTTPS://D-XXXXXXXXXX.awsapps.com/start/ accepted",
+    "unknown_key": "'alow_device_code' -> 'Unknown field(s) in managed policy', exit 1",
+    "allow_device_code_false": "login --use-device-code -> 'Device-code login is disabled by the managed policy.', exit 1",
+    "ignore_env_overrides": "SSOBROKER_HOME was ignored: doctor loaded the user's real ~/.ssobroker/orgs.yaml instead of the throwaway one (read-only)",
+    "max_session_hours": "user 8, policy 4 -> effective 4.0",
+    "deny_patterns": "'aws*iam create-user*' from the policy blocked exec, exit 2"
+  },
+  "logout": {
+    "before": "aws sso list-accounts with the cached access token -> 3 accounts",
+    "after": {
+      "access_token": "UnauthorizedException: Session token not found or invalid",
+      "refresh_token": "InvalidGrantException"
+    },
+    "local_cache": "0 files"
+  }
+}

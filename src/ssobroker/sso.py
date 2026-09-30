@@ -55,6 +55,9 @@ _CLIENT_REGISTRATION_MARGIN_SECONDS = 3600
 
 _LOGIN_TIMEOUT_SECONDS = 600
 
+# Refresh the SSO access token this long before it expires.
+_ACCESS_TOKEN_REFRESH_MARGIN_SECONDS = 120
+
 
 class SsoLoginError(RuntimeError):
     pass
@@ -118,6 +121,12 @@ def login(
 ) -> SsoToken:
     """Return a cached SSO token, or run a login flow to get a new one.
 
+    The authorization-code flow gets a 1-hour access token plus a refresh
+    token. The refresh token is kept in the same place as the access token
+    (OS keychain when available) and used to get new access tokens without a
+    browser, but never past `max_session_hours` from the original sign-in and
+    never past the Identity Center session itself.
+
     All diagnostic output (the sign-in URL, prompts) goes to stderr — never
     stdout — so this function is safe to call from a command whose stdout
     must be clean machine-readable output (see `creds-process`).
@@ -128,15 +137,11 @@ def login(
         issued_at = cached.get("issuedAt", 0)
         age_hours = (time.time() - issued_at) / 3600.0
         if age_hours <= max_session_hours:
-            return SsoToken(
-                access_token=cached["accessToken"],
-                expires_at=cached["expiresAt"],
-                region=region,
-                start_url=start_url,
-                role_credential_cache=role_credential_cache,
-            )
-        # Cached token is still server-side valid but older than our local
-        # policy allows — drop it and force a fresh login.
+            refreshed = _usable_token(cached, cache_key, start_url, region, max_session_hours)
+            if refreshed:
+                return _to_token(refreshed, start_url, region, role_credential_cache)
+        # Older than local policy allows, or expired and not refreshable:
+        # drop it and force a fresh sign-in.
         cache.clear(cache_key)
 
     if flow == "device_code" and not allow_device_code:
@@ -150,26 +155,66 @@ def login(
     else:
         raise SsoLoginError(f"Unknown login flow {flow!r}")
 
-    # Only the access token is kept. A refresh token, if AWS returned one, is
-    # deliberately dropped: re-auth after max_session_hours is the point.
-    now = time.time()
-    expires_at = now + token.get("expiresIn", 28800)
-    cache.put(
-        cache_key,
-        {
-            "accessToken": token["accessToken"],
-            "expiresAt": expires_at,
-            "issuedAt": now,
-            "region": region,
-        },
-    )
+    entry = _store_token(cache_key, token, time.time(), flow, region, max_session_hours)
+    return _to_token(entry, start_url, region, role_credential_cache)
+
+
+def _to_token(entry: dict, start_url: str, region: str, role_credential_cache: str) -> SsoToken:
     return SsoToken(
-        access_token=token["accessToken"],
-        expires_at=expires_at,
+        access_token=entry["accessToken"],
+        expires_at=entry.get("accessTokenExpiresAt", entry["expiresAt"]),
         region=region,
         start_url=start_url,
         role_credential_cache=role_credential_cache,
     )
+
+
+def _store_token(
+    cache_key: str, token: dict, issued_at: float, flow: str, region: str, max_session_hours: float
+) -> dict:
+    now = time.time()
+    access_expires_at = now + token.get("expiresIn", 28800)
+    entry = {
+        "accessToken": token["accessToken"],
+        "accessTokenExpiresAt": access_expires_at,
+        "expiresAt": access_expires_at,
+        "issuedAt": issued_at,
+        "region": region,
+        "flow": flow,
+    }
+    if token.get("refreshToken"):
+        entry["refreshToken"] = token["refreshToken"]
+        # Keep the entry (and its refresh token) until the local session cap,
+        # not just until the 1-hour access token expires.
+        entry["expiresAt"] = max(access_expires_at, issued_at + max_session_hours * 3600)
+    cache.put(cache_key, entry)
+    return entry
+
+
+def _usable_token(
+    cached: dict, cache_key: str, start_url: str, region: str, max_session_hours: float
+) -> dict | None:
+    """The cached entry if its access token is still good, else a refreshed
+    entry, else None."""
+    access_expires_at = cached.get("accessTokenExpiresAt", cached["expiresAt"])
+    if access_expires_at - time.time() > _ACCESS_TOKEN_REFRESH_MARGIN_SECONDS:
+        return cached
+    refresh_token = cached.get("refreshToken")
+    flow = cached.get("flow", "auth_code")
+    client = cache.get(_client_cache_key(start_url, region, flow))
+    if not refresh_token or not client:
+        return None
+    oidc = boto3.client("sso-oidc", region_name=region)
+    try:
+        token = oidc.create_token(
+            clientId=client["clientId"],
+            clientSecret=client["clientSecret"],
+            grantType="refresh_token",
+            refreshToken=refresh_token,
+        )
+    except ClientError:
+        return None  # session ended or was revoked: sign in again
+    return _store_token(cache_key, dict(token), cached["issuedAt"], flow, region, max_session_hours)
 
 
 def _registered_client(oidc, start_url: str, region: str, flow: str) -> tuple[str, str]:
