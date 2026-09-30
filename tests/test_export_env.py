@@ -101,3 +101,13 @@ def test_powershell_double_quotes_in_value_do_not_end_the_string(monkeypatch):
     assert line.endswith('"')
     body = line[len('$env:AWS_SESSION_TOKEN = "') : -1]
     assert '`"' in body  # the embedded quotes were escaped, not left bare
+
+
+@pytest.mark.parametrize("quote", ["\u201c", "\u201d", "\u201e"])
+def test_powershell_typographic_quotes_are_escaped(monkeypatch, quote):
+    # Found by Hypothesis: PowerShell ends a double-quoted string at these too.
+    _fake_creds(monkeypatch, SessionToken=f"abc{quote}; Remove-Item C:\; {quote}def")
+    lines = exec_cmd.export_env_lines(CFG, TOKEN, "prod", "admin", powershell=True)
+    line = next(line_ for line_ in lines.splitlines() if "AWS_SESSION_TOKEN" in line_)
+    assert f"`{quote}" in line
+    assert line.count(quote) == line.count(f"`{quote}")

@@ -283,9 +283,19 @@ def _powershell_quote(value: str) -> str:
     string. AWS credentials/regions never actually contain these characters,
     but the values still come from an external API response, so this is
     defensive rather than provably unnecessary — same reasoning as using
-    shlex.quote() for the POSIX side above."""
-    escaped = value.replace("`", "``").replace('"', '`"').replace("$", "`$")
+    shlex.quote() for the POSIX side above.
+
+    PowerShell also ends a double-quoted string at the typographic quotes
+    U+201C, U+201D and U+201E, so those are escaped too (found by the
+    Hypothesis property test in tests/test_properties.py)."""
+    escaped = "".join(f"`{ch}" if ch in _POWERSHELL_SPECIAL else ch for ch in value)
     return f'"{escaped}"'
+
+
+# Characters with meaning inside a PowerShell double-quoted string: the escape
+# character, variable expansion, and every character PowerShell treats as a
+# double quote.
+_POWERSHELL_SPECIAL = frozenset('`$"“”„')
 
 
 def credential_process_payload(
