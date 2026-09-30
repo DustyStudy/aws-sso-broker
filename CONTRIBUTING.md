@@ -65,3 +65,33 @@ following [Conventional Commits](https://www.conventionalcommits.org/):
 
 This only matters for commits on `main` going forward — nothing needs to be
 retrofixed on history.
+
+## Dependency lockfiles
+
+`requirements/*.txt` are hash-locked with uv. Regenerate after changing
+`pyproject.toml` or `requirements/release.in`:
+
+```bash
+uv pip compile pyproject.toml --extra dev --universal --generate-hashes --python-version 3.11 -o requirements/dev.txt
+uv pip compile pyproject.toml --extra keyring --extra windows --universal --generate-hashes --python-version 3.11 -o requirements/runtime.txt
+uv pip compile requirements/release.in --universal --generate-hashes --python-version 3.11 -o requirements/release.txt
+```
+
+`runtime.txt` is attached to every release and is what the SBOM describes.
+
+## Releases
+
+Merging the release-please PR tags the release. The same workflow then
+builds the wheel and sdist with the hash-pinned tools in
+`requirements/release.txt`, generates a CycloneDX SBOM, attests build
+provenance for all of it, and uploads the files to the GitHub release.
+
+Publishing to PyPI is off until trusted publishing is set up (no API token is
+stored anywhere):
+
+1. On PyPI, add a trusted publisher for project `aws-sso-broker`: owner
+   `DustyStudy`, repository `aws-sso-broker`, workflow
+   `release-please.yml`, environment `pypi`.
+2. In the repository settings, create an environment named `pypi`
+   (optionally with required reviewers).
+3. Set the repository variable `PYPI_PUBLISH` to `true`.

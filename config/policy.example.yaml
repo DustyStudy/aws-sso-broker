@@ -1,0 +1,49 @@
+# Admin-managed policy for ssobroker. Deploy it with MDM / config management to:
+#   Linux, macOS: /etc/ssobroker/policy.yaml   (owned by root, not group/world-writable)
+#   Windows:      %ProgramData%\ssobroker\policy.yaml   (only Administrators/SYSTEM can write)
+#
+# Every setting is optional. The policy can only make ssobroker stricter than a
+# user's own orgs.yaml / guardrails.yaml; it never supplies a start URL or
+# loosens anything. An unknown key is an error, so a typo fails closed.
+# See docs/ENTERPRISE.md.
+
+# Only these Identity Center start URLs may be used (case and trailing slash
+# are ignored). Stops a tampered orgs.yaml from sending the next sign-in to an
+# attacker's Identity Center instance.
+allowed_sso_start_urls:
+  - https://corp.awsapps.com/start
+
+# Force a fresh browser sign-in after this many hours (a user can set lower).
+max_session_hours: 4
+
+# Ignore SSOBROKER_HOME / SSOBROKER_CONFIG / SSOBROKER_GUARDRAILS, so guardrails
+# can't be switched off by pointing an environment variable at an empty file.
+ignore_env_overrides: true
+
+# Refuse the device-code sign-in flow (the one device-code phishing abuses).
+allow_device_code: false
+
+# Guardrails added on top of each user's guardrails.yaml.
+strict_protected_accounts: true
+protected_account_ids:
+  - "111111111111"   # management account
+deny_patterns:
+  - "aws*kms schedule-key-deletion*"
+  - "aws*cloudtrail delete-trail*"
+  - "aws*cloudtrail stop-logging*"
+require_confirmation_patterns:
+  - "aws*rds delete-db-instance*"
+
+# Role credential cache: at least this strict (file < keyring < none).
+role_credential_cache: keyring
+
+# Added to the built-in audit redaction patterns.
+audit_redact_flags: ["*connection-string*"]
+
+# Forward every audit entry. cloudwatch needs cloudwatch_log_group; set
+# cloudwatch_account/cloudwatch_role to a registry account and a role that can
+# only write to that group. Account can be an alias or a 12-digit ID.
+audit_forward: [cloudwatch]
+cloudwatch_log_group: /corp/ssobroker/audit
+cloudwatch_account: "444444444444"
+cloudwatch_role: AuditLogWriter

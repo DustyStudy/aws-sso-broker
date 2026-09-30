@@ -25,6 +25,7 @@ What this tool has custody of, at some point, and what protecting it means:
 | Short-lived role credentials (`AccessKeyId`/`SecretAccessKey`/`SessionToken`) | Same cache, keyed per account+role | Same as above, plus never exported outside the one child process/shell that requested them — except via `export-env`/`creds-process`, whose whole purpose is printing them to stdout for the caller's own use (see scenario 4) |
 | `orgs.yaml` (account registry) | `~/.ssobroker/orgs.yaml` (or `SSOBROKER_CONFIG`) | Contains account IDs and role names only — no secrets — but is still the map an attacker would want to see, and its contents drive which guardrails apply |
 | `guardrails.yaml` | `~/.ssobroker/guardrails.yaml` (or `SSOBROKER_GUARDRAILS`) | Governs which commands get blocked/confirmed — its integrity matters more than its confidentiality |
+| `policy.yaml` (admin-managed, optional) | `/etc/ssobroker/` or `%ProgramData%\ssobroker\` | Written only by root/Administrators; can only tighten user settings, never loosen them or supply a start URL |
 | Local audit log | `~/.ssobroker/audit.log` (or `SSOBROKER_HOME`) | A record of what was run against which account, for the operator's own review; append-only in practice, not append-only *enforced* (see below) |
 | `~/.aws/config` profiles written by `sync-aws-config` | Standard AWS config location | Must not silently absorb or overwrite a profile the tool didn't create |
 
@@ -72,7 +73,11 @@ account, same role, until expiry. This is inherent to any tool that caches
 credentials locally at all, not something a config change in `ssobroker`
 fixes; it's why `max_session_hours` exists (force re-auth sooner than AWS's
 own token expiry) and why `ssobroker logout` clearing the cache immediately is
-part of the documented incident-response step.
+part of the documented incident-response step. `logout` also calls the SSO
+portal's `Logout` API, so the stolen SSO token stops working at AWS, not
+just locally. Role credentials already issued stay valid until they expire;
+`role_credential_cache: keyring` (or `none`) keeps them off disk, and cached
+ones are only reused under the SSO session that fetched them.
 
 ### 2. A malicious or careless command is run against the wrong account
 
@@ -111,19 +116,27 @@ attacker-controlled Identity Center instance.
 in-memory trust carried across invocations), and `yaml.safe_load` is used
 throughout — no arbitrary object construction or code execution via a
 crafted YAML file, unlike `yaml.load` with the default loader.
+`sso_start_url` must be `https://`. When an admin deploys the managed
+policy (`policy.yaml`, writable only by root/Administrators),
+`allowed_sso_start_urls` pins which Identity Center instances may be used,
+its guardrails are added on top of the user's file and can't be removed
+from it, and `ignore_env_overrides` stops `SSOBROKER_GUARDRAILS` /
+`SSOBROKER_CONFIG` / `SSOBROKER_HOME` from pointing ssobroker at
+attacker-chosen files. On POSIX a policy file not owned by root, or
+writable by group/other, is refused.
 
 **Residual risk:** neither file is integrity-checked (no signature, no
 checksum pinned elsewhere) — if an attacker can write to
 `~/.ssobroker/*.yaml`, they can silently change guardrail behavior or, more
 seriously, redirect `sso_start_url`/`sso_region` to an attacker-controlled
-endpoint and phish the operator's next device-authorization approval. This
+endpoint and phish the operator's next sign-in. This
 requires local write access to the operator's home directory already,
 which is a fairly high bar (roughly equivalent to "attacker already has
 code execution as this user"), but it's worth naming explicitly rather
-than leaving implicit. Anyone deploying `ssobroker` fleet-wide should treat
-`~/.ssobroker/orgs.yaml`'s `sso_start_url` the same way they'd treat any other
-security-relevant config pushed to endpoints — via a managed/attested
-channel, not an ad-hoc copy.
+than leaving implicit. Without a managed policy this still holds. Anyone deploying `ssobroker`
+fleet-wide should deploy `policy.yaml` with `allowed_sso_start_urls` and
+`ignore_env_overrides` (see [ENTERPRISE.md](ENTERPRISE.md)). On Windows the
+policy's protection depends on the folder ACL the admin sets.
 
 ### 4. Credentials leak out of the intended child process
 
@@ -134,9 +147,10 @@ or the parent shell's own environment.
 **Mitigation:** for `exec`/`shell`, `exec_cmd._creds_to_env()` builds a
 **copy** of the environment (`os.environ.copy()`), so the parent shell's
 own `os.environ` is never mutated — credentials exist only in the memory of
-the one `subprocess.run()` child. `AWS_PROFILE` is explicitly stripped from
-that copy so a long-lived profile configured in the parent shell can't get
-picked up by mistake alongside the short-lived creds. `subprocess.run()` is
+the one `subprocess.run()` child. `AWS_PROFILE`, `AWS_DEFAULT_PROFILE`, web-identity and container-credential
+variables are explicitly stripped from that copy so no other credential
+source configured in the parent shell can get picked up by mistake
+alongside the short-lived creds. `subprocess.run()` is
 called with a list (`command`), never `shell=True` with a joined string —
 so there's no shell-injection surface from account aliases, role names, or
 arguments containing shell metacharacters.
@@ -197,10 +211,14 @@ operator's command history; anyone who can write to it could inject
 forged entries.
 
 **Mitigation:** this is opt-in (`cloudwatch_log_group` must be explicitly
-set) and uses whatever credentials are already active in the calling
-shell — meaning the operator controls, via their own IAM setup, exactly
-which role has `logs:PutLogEvents`/`logs:CreateLogStream` on that group.
-`ssobroker` itself requests no broader permission than that.
+set, and `audit_forward: [cloudwatch]` or `--push-cloudwatch` used). It
+writes with a dedicated logging role (`cloudwatch_account` /
+`cloudwatch_role`) when one is set, else the credentials active in the
+calling shell, so the operator controls exactly which role has
+`logs:PutLogEvents`/`logs:CreateLogStream` on that group. Values of
+secret-looking arguments are redacted before an entry is written or sent.
+Only the managed policy (root/Administrators-writable) or the user's own
+orgs.yaml can turn forwarding on.
 
 **Residual risk:** this is entirely a function of how the operator
 provisions and secures the destination log group (encryption at rest, log
@@ -229,6 +247,26 @@ actual tamper-evident record of what happened in AWS**, independent of
 anything this CLI does locally. If you need a defensible audit trail,
 that's what to point an auditor at.
 
+### 8. Sign-in phishing (device-code phishing)
+
+**Threat:** an attacker starts a device-authorization sign-in against the
+victim's Identity Center, then sends the victim the real AWS approval link
+("verify your session"). The page is genuine, so the victim approves, and the
+attacker's poller receives the SSO token.
+
+**Mitigation:** `ssobroker login` defaults to the authorization-code grant
+with PKCE and a `127.0.0.1` loopback redirect. The authorization code is
+delivered only to the listener on the machine that started the sign-in, the
+`state` value is checked, and the code is useless without the PKCE verifier
+that never leaves the process. The device-code flow is still available for
+headless machines, prints a warning to approve only requests you started,
+and can be disabled fleet-wide with `allow_device_code: false`.
+
+**Residual risk:** the managed policy doesn't stop an attacker from running
+their own device-code sign-in against your Identity Center with some other
+tool; it only removes the flow from `ssobroker`. Require MFA and user
+awareness in Identity Center itself.
+
 ## Explicitly out of scope
 
 Naming these directly, rather than leaving them as an implied gap:
@@ -254,7 +292,7 @@ Naming these directly, rather than leaving them as an implied gap:
   been misconfigured or its admin access compromised. That's an identity
   provider's own security posture, not something a client tool layered on
   top of it can compensate for.
-- **Network-level attacks against the SSO OIDC device-authorization flow**
+- **Network-level attacks against the SSO OIDC sign-in flows**
   (e.g. an attacker intercepting the verification URL before the operator
   approves it). This is AWS SSO OIDC's own protocol design, not something
   `ssobroker` implements or could add mitigations to beyond what the protocol
@@ -264,6 +302,10 @@ Naming these directly, rather than leaving them as an implied gap:
 
 ## Recommended compensating controls (for whoever deploys this)
 
+Start with [ENTERPRISE.md](ENTERPRISE.md): a managed `policy.yaml` pinning
+`allowed_sso_start_urls`, turning off device-code sign-in and environment
+overrides, and forwarding the audit log.
+
 None of these are things `ssobroker` does for you — they're the actual
 enforcement layer this tool assumes exists around it:
 
@@ -271,7 +313,7 @@ enforcement layer this tool assumes exists around it:
   scoped to least privilege for that role's actual job.
 - CloudTrail enabled org-wide, as the real (tamper-evident, AWS-side)
   record of API activity — not the local audit log.
-- MFA required at the Identity Center level for the device-authorization
+- MFA required at the Identity Center level for the sign-in
   flow itself.
 - If using `--push-cloudwatch`: encryption at rest on the destination log
   group, a resource policy restricting who can read it, and a retention

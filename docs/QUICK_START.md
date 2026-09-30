@@ -38,8 +38,10 @@ Confirms your config parses and the local cache directory is writable.
 ssobroker login
 ```
 
-Opens your browser to approve a device-authorization request — the same
-flow `aws sso login` uses. The resulting token is cached locally
+Opens your browser to sign in to Identity Center (authorization code with
+PKCE, the same flow `aws sso login` uses). On a machine with no local browser,
+run `ssobroker login --use-device-code` instead, and only approve a request
+you started yourself. The resulting token is cached locally
 (`~/.ssobroker/cache`) until it naturally expires (typically ~8 hours).
 
 ## 5. Use it
