@@ -156,6 +156,12 @@ def test_scan_orders_warnings_first(tmp_path):
 # --- doctor -------------------------------------------------------------------
 
 
+def _flat(output: str) -> str:
+    """Rich wraps lines at the terminal width (long temp paths on macOS), so
+    compare text with every run of whitespace collapsed to one space."""
+    return " ".join(output.split())
+
+
 @pytest.fixture
 def _doctor_env(tmp_path, monkeypatch):
     monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path / "ssobroker"))
@@ -173,7 +179,8 @@ def test_doctor_warns_but_passes_by_default_and_fails_with_strict(tmp_path, _doc
     _write_creds(tmp_path, "[default]\naws_access_key_id = fake-id\n")
     runner = CliRunner()
     result = runner.invoke(cli.main, ["doctor"])
-    assert "WARN" in result.output and "long-lived access key" in result.output
+    out = _flat(result.output)
+    assert "WARN" in out and "long-lived access key" in out
     assert result.exit_code == 0
     strict = runner.invoke(cli.main, ["doctor", "--strict"])
     assert strict.exit_code == 1
@@ -181,7 +188,7 @@ def test_doctor_warns_but_passes_by_default_and_fails_with_strict(tmp_path, _doc
 
 def test_doctor_reports_ok_when_nothing_is_left_on_disk(_doctor_env):
     result = CliRunner().invoke(cli.main, ["doctor", "--strict"])
-    assert "no AWS CLI credentials or SSO tokens left on disk" in result.output
+    assert "no AWS CLI credentials or SSO tokens left on disk" in _flat(result.output)
     assert result.exit_code == 0
 
 
