@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from ssobroker import audit, policy
+from ssobroker import audit, exposure, policy
 
 
 @pytest.fixture(autouse=True)
@@ -13,6 +13,9 @@ def _no_managed_policy(tmp_path, monkeypatch):
     monkeypatch.setattr(policy, "managed_policy_path", lambda: tmp_path / "no-policy.yaml")
     policy.load.cache_clear()
     audit.configure(audit.AuditSettings())
+    # doctor scans the AWS CLI's files; never let a test read the real ~/.aws.
+    monkeypatch.setattr(exposure, "_aws_dir", lambda: tmp_path / "aws-home")
+    monkeypatch.delenv("AWS_SHARED_CREDENTIALS_FILE", raising=False)
     yield
     policy.load.cache_clear()
     audit.configure(audit.AuditSettings())

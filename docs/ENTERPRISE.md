@@ -173,6 +173,7 @@ for that region.
 
 - [ ] Wheel verified with `gh attestation verify` and mirrored internally
 - [ ] `policy.yaml` deployed, root/Administrators-only write, `ssobroker doctor` shows it
+- [ ] `ssobroker doctor --strict` passes on every machine: no long-lived keys in `~/.aws/credentials`, no AWS CLI SSO tokens left in `~/.aws/sso/cache`
 - [ ] `allowed_sso_start_urls` set
 - [ ] `allow_device_code: false` (except on headless machines)
 - [ ] MFA required in Identity Center

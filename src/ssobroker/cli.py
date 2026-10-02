@@ -8,9 +8,21 @@ from typing import TypeVar
 
 import click
 from rich.console import Console
+from rich.markup import escape
 from rich.table import Table
 
-from . import audit, aws_config_sync, cache, config, exec_cmd, guardrails, network, policy, sso
+from . import (
+    audit,
+    aws_config_sync,
+    cache,
+    config,
+    exec_cmd,
+    exposure,
+    guardrails,
+    network,
+    policy,
+    sso,
+)
 from .config import ConfigError
 from .paths import home_dir
 
@@ -242,8 +254,13 @@ def logout(local_only: bool):
 
 
 @main.command()
-def doctor():
-    """Sanity-check config, cache dir, and guardrails file."""
+@click.option(
+    "--strict",
+    is_flag=True,
+    help="Exit non-zero if AWS credentials are left on disk outside ssobroker",
+)
+def doctor(strict: bool):
+    """Sanity-check config, cache dir, guardrails file, and stray AWS credentials."""
     problems = []
     pol = policy.load()
     if pol.active:
@@ -275,6 +292,19 @@ def doctor():
         console.print(f"[green]OK[/green] guardrails file present: {gcfg_path}")
     else:
         console.print("[yellow]NOTE[/yellow] no guardrails.yaml — using built-in defaults only")
+
+    # Credentials other tools left on disk are what infostealers collect; ssobroker's
+    # own cache can be locked down and still lose to a key in ~/.aws/credentials.
+    findings = exposure.scan()
+    for finding in findings:
+        if finding.level == "WARN":
+            console.print(f"[yellow]WARN[/yellow] {escape(finding.message)}", highlight=False)
+            if strict:
+                problems.append(finding.message)
+        else:
+            console.print(f"[dim]NOTE {escape(finding.message)}[/dim]", highlight=False)
+    if not findings:
+        console.print("[green]OK[/green] no AWS CLI credentials or SSO tokens left on disk")
 
     if problems:
         sys.exit(1)

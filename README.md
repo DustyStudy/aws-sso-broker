@@ -92,6 +92,11 @@ guardrails do and do not protect against.
   every read. Cached role credentials are tied to the SSO session that
   fetched them, are refreshed when under 5 minutes remain, and can be kept in
   the OS keychain or not cached at all (`role_credential_cache`).
+- **Finds credentials infostealers look for** (`ssobroker doctor`): warns
+  about long-lived access keys in `~/.aws/credentials` and unexpired or
+  refresh-capable AWS CLI SSO tokens in `~/.aws/sso/cache/`, the files
+  commodity infostealers copy. Prints names, counts and expiry only;
+  `--strict` fails the check. See threat scenario 9.
 - **Admin-managed policy** (`/etc/ssobroker/policy.yaml`,
   `%ProgramData%\ssobroker\policy.yaml`): pin the allowed Identity Center
   start URLs, cap session length, add guardrails, turn off device-code sign-in
@@ -213,8 +218,8 @@ rewritten to call `ssobroker`.
 ssobroker init
 $EDITOR ~/.ssobroker/orgs.yaml   # add your SSO start URL + account IDs/roles
 
-# 2. Sanity-check everything
-ssobroker doctor
+# 2. Sanity-check everything, including AWS CLI credentials left on disk
+ssobroker doctor          # --strict exits 1 if any are found
 
 # 3. Log in (opens your browser to sign in to Identity Center)
 ssobroker login

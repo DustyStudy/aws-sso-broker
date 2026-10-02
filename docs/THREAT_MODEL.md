@@ -272,6 +272,31 @@ their own device-code sign-in against your Identity Center with some other
 tool; it only removes the flow from `ssobroker`. Require MFA and user
 awareness in Identity Center itself.
 
+### 9. Infostealer harvests AWS CLI files left beside ssobroker
+
+**Threat:** commodity infostealers (Lumma, RedLine, Vidar) copy
+`~/.aws/credentials`, `~/.aws/sso/cache/` and `~/.aws/cli/cache/` from
+developer machines. [Wiz (2026-09-25)](https://www.wiz.io/blog/infostealer-incursion-cloud-ai-credentials)
+found AWS secrets were 46% of the cloud credentials in infostealer logs, and
+that SSO cache tokens can stay usable for up to 90 days unless revoked. A
+stolen refresh-capable SSO token mints role credentials for every account its
+user can reach. ssobroker's own cache does not help if the same machine still
+has a long-lived access key or an `aws sso login` token from before.
+
+**Mitigation:** `ssobroker doctor` scans those three locations (and
+`AWS_SHARED_CREDENTIALS_FILE`) and prints a WARN for any long-lived access key
+and any AWS CLI SSO token that is unexpired or refresh-capable, plus a NOTE for
+cached temporary credentials. It reads only profile names, counts and expiry
+times and never prints a key or token. `ssobroker doctor --strict` exits 1 on
+a WARN, so a fleet check or login script can enforce it.
+
+**Residual risk:** `doctor` reports; it does not delete. The operator still has
+to deactivate the key in IAM and run `aws sso logout`. It does not see other
+tools' credential stores (Granted, aws-vault, IDE plugins, exported shell
+variables). Malware already running as the user can read ssobroker's own cache
+too (see "Explicitly out of scope"); keep `max_session_hours` short and revoke
+the user's Identity Center sessions after a suspected compromise.
+
 ## Explicitly out of scope
 
 Naming these directly, rather than leaving them as an implied gap:
