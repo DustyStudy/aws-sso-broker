@@ -24,6 +24,8 @@ scrutiny for security review:
 - `src/ssobroker/exec_cmd.py` — how credentials are exported into child
   processes
 - `src/ssobroker/guardrails.py` — the local deny/confirm-pattern checks
+- `src/ssobroker/exposure.py` — reads the AWS CLI's credential and token
+  files for `doctor`; must never print or return a key or token value
 
 ## Design notes relevant to security review
 
