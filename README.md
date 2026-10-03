@@ -321,7 +321,7 @@ ssobroker-managed sections yourself. Re-run it any time your `orgs.yaml` changes
 
 ### `~/.ssobroker/orgs.yaml`
 
-See [`config/orgs.example.yaml`](config/orgs.example.yaml). No secrets live
+See [`src/ssobroker/examples/orgs.example.yaml`](src/ssobroker/examples/orgs.example.yaml). No secrets live
 here: just your Identity Center start URL/region and a map of aliases to
 account IDs and role names. Two optional top-level fields:
 
