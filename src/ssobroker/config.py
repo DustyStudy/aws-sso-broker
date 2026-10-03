@@ -99,8 +99,7 @@ def load(path: Path | None = None) -> OrgConfig:
     if not path.exists():
         raise ConfigError(
             f"No config found at {path}.\n"
-            f"Run `ssobroker init` to create one from the example, or copy "
-            f"config/orgs.example.yaml there and edit it."
+            "Run `ssobroker init` to create one from the bundled example."
         )
     raw = yaml.safe_load(path.read_text()) or {}
 

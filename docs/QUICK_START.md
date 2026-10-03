@@ -14,8 +14,8 @@ python3 -m pip install -e .
 ssobroker init
 ```
 
-This copies the bundled `orgs.example.yaml` (kept in sync with
-[`config/orgs.example.yaml`](../config/orgs.example.yaml) in this repo) to
+This copies the bundled
+[`orgs.example.yaml`](../src/ssobroker/examples/orgs.example.yaml) to
 `~/.ssobroker/orgs.yaml`. Open it and fill in:
 
 - `sso_start_url` — your IAM Identity Center portal URL (looks like
