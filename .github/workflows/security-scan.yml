@@ -12,92 +12,13 @@ permissions:
   contents: read
 
 jobs:
-  gitleaks:
-    name: Secrets (Gitleaks)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - name: Scan full history for secrets
-        uses: gitleaks/gitleaks-action@e0c47f4f8be36e29cdc102c57e68cb5cbf0e8d1e # v3
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-
-  trivy:
-    name: Vulnerabilities and misconfiguration (Trivy)
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
+  scan:
+    # Shared Gitleaks, Checkov, Trivy and zizmor jobs.
+    uses: DustyStudy/DustyStudy/.github/workflows/security-scan.yml@237fae28cae3a52f29a19129ced1420d0bd9ef7f # DustyStudy/DustyStudy#33
     permissions:
       contents: read
+      pull-requests: read
       security-events: write
-    steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-
-      - name: Run Trivy filesystem scan
-        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25 # v0.36.0
-        with:
-          scan-type: fs
-          scan-ref: .
-          scanners: vuln,misconfig
-          severity: HIGH,CRITICAL
-          ignore-unfixed: true
-          format: sarif
-          output: trivy-results.sarif
-          exit-code: "0"
-
-      - name: Upload results to the Security tab
-        uses: github/codeql-action/upload-sarif@1c5b675653bb5c22dbe9b12b556ec555138e09fd # v4.38.1
-        if: always() && hashFiles('trivy-results.sarif') != ''
-        with:
-          sarif_file: trivy-results.sarif
-          category: trivy
-
-  zizmor:
-    name: Workflow security (zizmor)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    permissions:
-      contents: read
-    steps:
-      - name: Harden runner
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-
-      - name: Checkout
-        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
-        with:
-          persist-credentials: false
-
-      # Hash-pinned wheel, same as a pinned action SHA.
-      - name: Install zizmor
-        run: |
-          python3 -m venv "$RUNNER_TEMP/zizmor"
-          echo "zizmor==1.30.1 --hash=sha256:eee12266b793cb87ad4a7e3af2e72404f8a63e3de5eb099b80bf7b1cfd232a8e" > "$RUNNER_TEMP/zizmor.txt"
-          "$RUNNER_TEMP/zizmor/bin/pip" install --quiet --require-hashes --only-binary=:all: -r "$RUNNER_TEMP/zizmor.txt"
-
-      # The token turns on the online audits: impostor commits, ref confusion
-      # and actions with known vulnerabilities.
-      - name: Audit workflows
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: '"$RUNNER_TEMP/zizmor/bin/zizmor" --format github --min-severity medium .github'
+      actions: read
+    with:
+      checkov: false # validate.yml runs it
