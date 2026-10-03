@@ -13,6 +13,11 @@ Log in once via your org's Identity Center portal, then run commands or open a
 shell against any account/role you're granted, with short-lived, auto-expiring
 credentials and a local audit trail.
 
+**Verified live:** two runs against a real Identity Center organization, with
+all 12 hardening claims proven. The second run caught a regression that would
+have forced users to sign in every hour, fixed before release.
+[Evidence](docs/PROOF.md).
+
 ## Why
 
 Most teams either hand out long-lived IAM user keys (bad) or make people
