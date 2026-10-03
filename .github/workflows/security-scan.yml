@@ -14,7 +14,7 @@ permissions:
 jobs:
   scan:
     # Shared Gitleaks, Checkov, Trivy and zizmor jobs.
-    uses: DustyStudy/DustyStudy/.github/workflows/security-scan.yml@237fae28cae3a52f29a19129ced1420d0bd9ef7f # DustyStudy/DustyStudy#33
+    uses: DustyStudy/DustyStudy/.github/workflows/security-scan.yml@237fae28cae3a52f29a19129ced1420d0bd9ef7f # ci/reusable-security-scan
     permissions:
       contents: read
       pull-requests: read
