@@ -81,10 +81,12 @@ uv pip compile requirements/release.in --universal --generate-hashes --python-ve
 
 ## Releases
 
-Merging the release-please PR tags the release. The same workflow then
-builds the wheel and sdist with the hash-pinned tools in
-`requirements/release.txt`, generates a CycloneDX SBOM, attests build
-provenance for all of it, and uploads the files to the GitHub release.
+Merging the release-please PR tags the release and creates it as a draft.
+The same workflow then builds the wheel and sdist with the hash-pinned tools
+in `requirements/release.txt`, generates a CycloneDX SBOM, attests build
+provenance for all of it, uploads the files and the attestation bundle to
+the draft, and publishes it. If the build fails, the release stays a draft:
+re-run the `build` job.
 
 Publishing to PyPI is off until trusted publishing is set up (no API token is
 stored anywhere):

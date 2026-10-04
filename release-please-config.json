@@ -1,5 +1,7 @@
 {
   "bootstrap-sha": "2b3936cddc6bf6b46f23f7aedc68f1bbcf6e83e7",
+  "draft": true,
+  "force-tag-creation": true,
   "packages": {
     ".": {
       "release-type": "python",
