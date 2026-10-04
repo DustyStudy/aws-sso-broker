@@ -78,7 +78,7 @@ jobs:
         if: ${{ hashFiles('**/*.ps1') != '' }}
         shell: pwsh
         run: |
-          Install-Module -Name PSScriptAnalyzer -Force -Scope CurrentUser
+          Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
           $files = Get-ChildItem -Path . -Filter *.ps1 -Recurse -Exclude .git
           $results = $files | ForEach-Object { Invoke-ScriptAnalyzer -Path $_.FullName -Severity Warning,Error }
           if ($results) {
