@@ -6,6 +6,7 @@ about what the CLI does with the outcome, not about talking to AWS.
 
 from __future__ import annotations
 
+import json
 import time
 
 import pytest
@@ -109,6 +110,25 @@ def test_list_remote_expired_token_is_a_clean_error_not_a_traceback(monkeypatch)
     monkeypatch.setattr(cli.sso, "list_accounts", lambda *a, **k: (_ for _ in ()).throw(EXPIRED))
     result = invoke("list-remote")
     _clean_exit(result)
+
+
+def test_list_remote_json_lists_each_account_with_its_roles(monkeypatch):
+    monkeypatch.setattr(
+        cli.sso,
+        "list_accounts",
+        lambda *a, **k: [
+            {"accountId": "111111111111", "accountName": "prod"},
+            {"accountId": "222222222222", "accountName": None},
+        ],
+    )
+    monkeypatch.setattr(
+        cli.sso, "list_account_roles", lambda token, account_id: [f"ro-{account_id[0]}"]
+    )
+    result = invoke("list-remote", "--json")
+    assert json.loads(result.output) == [
+        {"account_id": "111111111111", "account_name": "prod", "roles": ["ro-1"]},
+        {"account_id": "222222222222", "account_name": "-", "roles": ["ro-2"]},
+    ]
 
 
 # --- exec ---------------------------------------------------------------------
