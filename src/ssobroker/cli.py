@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import shutil
 import sys
 from collections.abc import Callable
@@ -106,18 +107,15 @@ def _resolve_and_get_creds(
     return acct, resolved_role, creds
 
 
-def _fetch_remote_accounts(
-    token: sso.SsoToken,
-) -> tuple[list[str], list[str], list[list[str]]]:
-    accts = sso.list_accounts(token)
-    account_ids: list[str] = []
-    account_names: list[str] = []
-    roles_by_account: list[list[str]] = []
-    for a in accts:
-        account_ids.append(a["accountId"])
-        account_names.append(a["accountName"] or "-")
-        roles_by_account.append(sso.list_account_roles(token, a["accountId"]))
-    return account_ids, account_names, roles_by_account
+def _fetch_remote_accounts(token: sso.SsoToken) -> list[dict]:
+    return [
+        {
+            "account_id": a["accountId"],
+            "account_name": a["accountName"] or "-",
+            "roles": sso.list_account_roles(token, a["accountId"]),
+        }
+        for a in sso.list_accounts(token)
+    ]
 
 
 def _cache_dir_writable_error(cdir: Path) -> str | None:
@@ -319,8 +317,6 @@ def accounts(tag: str | None, as_json: bool):
     matched = config.accounts_by_tag(cfg, tag)
 
     if as_json:
-        import json
-
         print(
             json.dumps(
                 [
@@ -364,30 +360,18 @@ def list_remote(as_json: bool):
     """List accounts/roles actually granted to you right now via Identity Center."""
     cfg = _load_config_or_exit()
     token = _login_or_exit(cfg)
-    account_ids, account_names, roles_by_account = _guard(_fetch_remote_accounts, token)
+    remote = _guard(_fetch_remote_accounts, token)
 
     if as_json:
-        import json
-
-        print(
-            json.dumps(
-                [
-                    {"account_id": aid, "account_name": name, "roles": roles}
-                    for aid, name, roles in zip(
-                        account_ids, account_names, roles_by_account, strict=True
-                    )
-                ],
-                indent=2,
-            )
-        )
+        print(json.dumps(remote, indent=2))
         return
 
     table = Table(title="Accounts granted via Identity Center")
     table.add_column("Account ID")
     table.add_column("Account Name")
     table.add_column("Roles")
-    for aid, name, roles in zip(account_ids, account_names, roles_by_account, strict=True):
-        table.add_row(aid, name, ", ".join(roles))
+    for acct in remote:
+        table.add_row(acct["account_id"], acct["account_name"], ", ".join(acct["roles"]))
     console.print(table)
 
 
@@ -518,8 +502,6 @@ def creds_process(account: str, role: str | None):
     approval is needed) goes to stderr; stdout carries only the JSON
     document AWS tooling expects.
     """
-    import json
-
     try:
         cfg = _prepare(config.load())
     except ConfigError as e:
@@ -633,8 +615,6 @@ def audit_log(n: int, as_json: bool, push_cloudwatch: bool):
     entries = audit.tail(n)
 
     if as_json:
-        import json
-
         print(json.dumps(entries, indent=2))
     elif not entries:
         console.print("No audit entries yet.")
