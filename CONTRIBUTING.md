@@ -21,8 +21,9 @@ mypy src
 pytest -v --cov=ssobroker --cov-report=term-missing
 ```
 
-All four also run in CI (`.github/workflows/ci.yml`) on every push/PR, so a
-green run locally should mean a green run there too.
+Lint, formatting, typing and Bandit run once in `.github/workflows/validate.yml`.
+The full test suite runs across all nine OS/Python combinations in
+`.github/workflows/ci.yml` on every push/PR.
 
 ### pre-commit (optional)
 

@@ -29,84 +29,14 @@ jobs:
           persist-credentials: false
 
       - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
-        if: ${{ hashFiles('**/*.py') != '' }}
         with:
           python-version: "3.12"
 
       - name: Install and run ruff + bandit
-        if: ${{ hashFiles('**/*.py') != '' }}
         run: |
-          pip install --require-hashes -r requirements/lint.txt
+          python -m pip install --require-hashes -r requirements/dev.txt -r requirements/lint.txt
+          python -m pip install --no-deps -e .
           ruff check .
+          ruff format --check src tests
+          mypy src
           bandit -r . -ll --exclude ./.git
-
-  bash:
-    name: shellcheck (Bash)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Run shellcheck on every .sh file
-        if: ${{ hashFiles('**/*.sh') != '' }}
-        run: |
-          sudo apt-get update -qq && sudo apt-get install -y shellcheck
-          find . -name "*.sh" -not -path "./.git/*" -print0 | xargs -0 -r shellcheck
-
-  powershell:
-    name: PSScriptAnalyzer (PowerShell)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      - name: Run PSScriptAnalyzer on every .ps1 file
-        if: ${{ hashFiles('**/*.ps1') != '' }}
-        shell: pwsh
-        run: |
-          Install-Module -Name PSScriptAnalyzer -RequiredVersion 1.25.0 -Force -Scope CurrentUser
-          $files = Get-ChildItem -Path . -Filter *.ps1 -Recurse -Exclude .git
-          $results = $files | ForEach-Object { Invoke-ScriptAnalyzer -Path $_.FullName -Severity Warning,Error }
-          if ($results) {
-            $results | Format-Table -AutoSize
-            throw "PSScriptAnalyzer found $($results.Count) issue(s)"
-          }
-
-  iac-sast:
-    name: checkov (CFN + Terraform, if present)
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - name: Harden Runner
-        uses: step-security/harden-runner@e14015d583714f6e62063499dc959a02595150a1 # v2.21.1
-        with:
-          egress-policy: audit
-
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          persist-credentials: false
-
-      # bridgecrewio/checkov-action: the underlying checkov CLI parses
-      # --framework as a space-separated list of choices, not a
-      # comma-separated string — "cloudformation,terraform" (one token)
-      # fails argparse's choices check. Space-separate instead.
-      - uses: bridgecrewio/checkov-action@5798bad4f6dd9c1fb67ae3ec10d42d8fb67037c4 # v12.3126.0
-        with:
-          directory: .
-          framework: cloudformation terraform
-          quiet: true
-          soft_fail: false

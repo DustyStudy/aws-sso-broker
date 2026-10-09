@@ -24,4 +24,4 @@ jobs:
       security-events: write
       actions: read
     with:
-      checkov: false # validate.yml runs it
+      checkov: false # Python-only repository; no Terraform or CloudFormation to scan

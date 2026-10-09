@@ -58,14 +58,5 @@ jobs:
           python -m pip install --require-hashes -r requirements/dev.txt
           python -m pip install --no-deps -e .
 
-      - name: Ruff lint
-        run: ruff check src tests
-
-      - name: Ruff format check
-        run: ruff format --check src tests
-
-      - name: Mypy
-        run: mypy src
-
       - name: Pytest
         run: pytest -v --cov=ssobroker --cov-report=term-missing
