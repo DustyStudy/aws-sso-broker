@@ -65,9 +65,9 @@ boto3==1.43.104 \
     # via
     #   aws-sso-broker (pyproject.toml)
     #   moto
-boto3-stubs==1.43.104 \
-    --hash=sha256:95490f20724e0e00aa18b19625a280785bd26689c89e38363bbb9f2c6b5fa360 \
-    --hash=sha256:d1883ed4a78282b072e37bf08c4cfba8b220c8feb1371681eb35399b189111a3
+boto3-stubs==1.43.108 \
+    --hash=sha256:40f02e30f6e455ccb658dcdeb5756ce23bde767f425ab6d7f57a9ffad75a848c \
+    --hash=sha256:a1ed29b4c7957568e6261fc36d4c59025c004997a229e8f01940c205f2128e4a
     # via aws-sso-broker (pyproject.toml)
 botocore==1.43.104 \
     --hash=sha256:099f84876df9f6dc23a24b4d8c02da2d73c6949249761dd85585f735b825c182 \
