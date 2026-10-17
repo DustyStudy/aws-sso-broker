@@ -116,7 +116,7 @@ def run(
 
     confirm_pattern = guardrails.needs_confirmation(command, gcfg)
     if confirm_pattern and not assume_yes:
-        joined = " ".join(command)
+        joined = " ".join(audit.redact_command(command))
         print(
             f"This command matches a require-confirmation pattern "
             f"('{confirm_pattern}'):\n  {joined}\nagainst account "

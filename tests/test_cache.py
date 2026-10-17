@@ -95,3 +95,37 @@ def test_put_file_has_owner_only_permissions_on_disk(tmp_path, monkeypatch):
     cache.put("mykey", {"value": 1, "expiresAt": time.time() + 60})
     path = cache.cache_dir() / "mykey.json"
     assert stat.S_IMODE(path.stat().st_mode) == 0o600
+
+
+def test_keys_differing_only_in_replaced_characters_do_not_collide(tmp_path, monkeypatch):
+    # Ops+Admin and Ops_Admin are different permission sets.
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
+    cache.put("role-creds_x_111111111111_Ops+Admin", {"role": "plus"})
+    cache.put("role-creds_x_111111111111_Ops_Admin", {"role": "underscore"})
+    assert cache.get("role-creds_x_111111111111_Ops+Admin") == {"role": "plus"}
+
+
+class _BrokenKeyring:
+    def set_password(self, *a):
+        raise RuntimeError("locked")
+
+    def get_password(self, *a):
+        return "{}"
+
+    def delete_password(self, *a):
+        raise RuntimeError("locked")
+
+
+def test_explicit_keyring_never_falls_back_to_a_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
+    monkeypatch.setattr(cache, "_keyring_module", lambda: _BrokenKeyring())
+    cache.put("role-creds_k", {"secret": "x"}, keyring=True)
+    assert not list(cache.cache_dir().glob("role-creds_*.json"))
+
+
+def test_failed_keyring_delete_stays_indexed(tmp_path, monkeypatch):
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
+    monkeypatch.setattr(cache, "_keyring_module", lambda: _BrokenKeyring())
+    cache._keyring_index_add("sso-token_us-east-1_abc")
+    cache.clear()
+    assert cache.keys("sso-token_") == ["sso-token_us-east-1_abc"]

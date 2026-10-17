@@ -106,3 +106,19 @@ def test_builtin_deny_blocks_destructive_commands_with_global_flags_before_servi
     reason = guardrails.check_command(command, "222222222222", guardrails.GuardrailConfig())
     assert reason is not None
     assert "deny pattern" in reason
+
+
+@pytest.mark.parametrize("aws", ["/usr/local/bin/aws", r"C:\Program Files\Amazon\AWSCLIV2\aws.exe"])
+def test_builtin_deny_matches_full_path_to_aws(aws):
+    reason = guardrails.check_command(
+        [aws, "s3", "rb", "s3://b", "--force"], "222222222222", guardrails.GuardrailConfig()
+    )
+    assert reason is not None
+
+
+def test_unquoted_octal_protected_account_id_is_rejected(tmp_path):
+    # YAML reads 012345670123 as an octal int; it must not silently stop matching.
+    p = tmp_path / "guardrails.yaml"
+    p.write_text("protected_account_ids: [012345670123]\n")
+    with pytest.raises(guardrails.GuardrailBlocked, match="12 digits"):
+        guardrails.GuardrailConfig.load(p)

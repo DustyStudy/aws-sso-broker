@@ -83,9 +83,28 @@ class ManagedPolicy:
 
 def managed_policy_path() -> Path:
     if sys.platform == "win32":
-        base = os.environ.get("ProgramData", r"C:\ProgramData")
-        return Path(base) / "ssobroker" / "policy.yaml"
+        return Path(_program_data()) / "ssobroker" / "policy.yaml"
     return Path("/etc/ssobroker/policy.yaml")
+
+
+if sys.platform == "win32":
+
+    def _program_data() -> str:
+        """The real ProgramData folder from the shell. %ProgramData% is set per
+        process, so a user could point it at an empty folder and drop the policy."""
+        import ctypes
+        import uuid
+
+        folder_id = ctypes.create_string_buffer(
+            uuid.UUID("62AB5D82-FDC1-4DC3-A9DD-070D1D495D97").bytes_le  # FOLDERID_ProgramData
+        )
+        out = ctypes.c_wchar_p()
+        if ctypes.windll.shell32.SHGetKnownFolderPath(folder_id, 0, None, ctypes.byref(out)):
+            raise PolicyError("Could not locate the ProgramData folder for the managed policy.")
+        try:
+            return str(out.value)
+        finally:
+            ctypes.windll.ole32.CoTaskMemFree(out)
 
 
 def normalize_start_url(url: str) -> str:
@@ -104,11 +123,38 @@ def _check_trusted(path: Path) -> None:
             raise PolicyError(f"Refusing managed policy: {p} is writable by group or other.")
 
 
+def account_id(value: object) -> str:
+    """An AWS account ID as 12-digit text, or ValueError. Unquoted YAML turns
+    012345670123 into an octal int, which would silently stop matching."""
+    text = str(value)
+    if isinstance(value, bool) or not (len(text) == 12 and text.isascii() and text.isdigit()):
+        raise ValueError(f"account ID {value!r} is not 12 digits; quote it in YAML")
+    return text
+
+
+def _bool(raw: dict, key: str, default: bool) -> bool:
+    value = raw.get(key, default)
+    if not isinstance(value, bool):
+        # Fail closed: bool("false") is True.
+        raise PolicyError(f"Managed policy field '{key}' must be true or false, got {value!r}")
+    return value
+
+
 def _str_tuple(raw: dict, key: str) -> tuple[str, ...]:
     value = raw.get(key) or []
     if not isinstance(value, list):
         raise PolicyError(f"Managed policy field '{key}' must be a list.")
     return tuple(str(v) for v in value)
+
+
+def _account_ids(raw: dict, key: str) -> tuple[str, ...]:
+    value = raw.get(key) or []
+    if not isinstance(value, list):
+        raise PolicyError(f"Managed policy field '{key}' must be a list.")
+    try:
+        return tuple(account_id(v) for v in value)
+    except ValueError as e:
+        raise PolicyError(f"Managed policy field '{key}': {e}") from e
 
 
 def parse(raw: dict, path: Path | None) -> ManagedPolicy:
@@ -131,10 +177,10 @@ def parse(raw: dict, path: Path | None) -> ManagedPolicy:
             normalize_start_url(u) for u in _str_tuple(raw, "allowed_sso_start_urls")
         ),
         max_session_hours=float(max_hours) if max_hours is not None else None,
-        ignore_env_overrides=bool(raw.get("ignore_env_overrides", False)),
-        allow_device_code=bool(raw.get("allow_device_code", True)),
-        strict_protected_accounts=bool(raw.get("strict_protected_accounts", False)),
-        protected_account_ids=_str_tuple(raw, "protected_account_ids"),
+        ignore_env_overrides=_bool(raw, "ignore_env_overrides", False),
+        allow_device_code=_bool(raw, "allow_device_code", True),
+        strict_protected_accounts=_bool(raw, "strict_protected_accounts", False),
+        protected_account_ids=_account_ids(raw, "protected_account_ids"),
         deny_patterns=_str_tuple(raw, "deny_patterns"),
         require_confirmation_patterns=_str_tuple(raw, "require_confirmation_patterns"),
         role_credential_cache=role_cache,

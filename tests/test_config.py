@@ -178,3 +178,22 @@ def test_resolve_role_defaults_and_ambiguity(tmp_path):
 
     with pytest.raises(config.ConfigError):
         config.resolve_role(cfg.accounts["single-role"], "not-a-real-role")
+
+
+@pytest.mark.parametrize(
+    "account",
+    [
+        "account_id: 012345670123",  # unquoted: YAML reads it as octal
+        'account_id: "1234"',
+        "account_id: \"123456789012\"\n    roles: ['ro\n[profile x]']",
+        "account_id: \"123456789012\"\n    default_role: 'ro --role admin'",
+    ],
+)
+def test_load_rejects_bad_account_id_or_role_name(tmp_path, account):
+    p = write_orgs_yaml(
+        tmp_path,
+        "name: t\nsso_start_url: https://example.awsapps.com/start\nsso_region: us-east-1\n"
+        f"accounts:\n  prod:\n    {account}\n",
+    )
+    with pytest.raises(config.ConfigError):
+        config.load(p)

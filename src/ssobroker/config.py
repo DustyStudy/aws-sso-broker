@@ -11,6 +11,7 @@ never loosen them.
 
 from __future__ import annotations
 
+import re
 from dataclasses import dataclass, field
 from pathlib import Path
 from urllib.parse import urlparse
@@ -24,8 +25,20 @@ LOGIN_FLOWS = ("auth_code", "device_code")
 AUDIT_FORWARDERS = ("syslog", "eventlog", "cloudwatch")
 
 
+# Permission-set name characters. Aliases and roles end up in ~/.aws/config
+# section headers and credential_process command lines, so nothing else is allowed.
+_NAME_RE = re.compile(r"[A-Za-z0-9+=,.@_-]+")
+_REGION_RE = re.compile(r"[a-z]{2}(-[a-z]+)+-\d")
+
+
 class ConfigError(RuntimeError):
     pass
+
+
+def _name(value: object, what: str) -> str:
+    if not isinstance(value, str) or not _NAME_RE.fullmatch(value):
+        raise ConfigError(f"{what} {value!r} may only use letters, digits and +=,.@_-")
+    return value
 
 
 @dataclass
@@ -109,16 +122,26 @@ def load(path: Path | None = None) -> OrgConfig:
         raise ConfigError(f"orgs.yaml is missing required field(s): {sorted(missing)}")
 
     _validate_start_url(raw["sso_start_url"], pol)
+    for key in ("sso_region", "default_region"):
+        # default_region is written into ~/.aws/config by sync-aws-config.
+        if key in raw and not (isinstance(raw[key], str) and _REGION_RE.fullmatch(raw[key])):
+            raise ConfigError(f"'{key}' must be an AWS region like us-east-1, got {raw[key]!r}")
 
     accounts: dict[str, Account] = {}
     for alias, a in raw["accounts"].items():
+        _name(alias, "Account alias")
         if "account_id" not in a:
             raise ConfigError(f"Account '{alias}' is missing 'account_id'")
+        try:
+            account_id = policy.account_id(a["account_id"])
+        except ValueError as e:
+            raise ConfigError(f"Account '{alias}': {e}") from e
+        default_role = a.get("default_role")
         accounts[alias] = Account(
             alias=alias,
-            account_id=str(a["account_id"]),
-            roles=list(a.get("roles", [])),
-            default_role=a.get("default_role"),
+            account_id=account_id,
+            roles=[_name(r, f"Role in account '{alias}'") for r in a.get("roles", [])],
+            default_role=_name(default_role, "default_role") if default_role else None,
             tags=list(a.get("tags", [])),
         )
 

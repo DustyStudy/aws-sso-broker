@@ -301,3 +301,11 @@ def test_file_without_trailing_newline_gets_clean_separator(tmp_path):
     aws_config_sync.sync(cfg)
 
     assert _read(path).startswith("[profile dev]\nregion = us-west-2\n\n[profile prod]\n")
+
+
+def test_sync_honors_aws_config_file(monkeypatch, tmp_path):
+    target = tmp_path / "elsewhere" / "config"
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(target))
+    cfg = _cfg(prod=Account(alias="prod", account_id="111111111111", roles=["ro"]))
+    assert aws_config_sync.sync(cfg).path == target
+    assert "[profile prod]" in target.read_text()

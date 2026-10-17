@@ -12,6 +12,7 @@ left alone and reported back as a conflict instead of being silently mutated.
 
 from __future__ import annotations
 
+import os
 import re
 import shutil
 import time
@@ -43,7 +44,9 @@ class SyncResult(NamedTuple):
 
 
 def aws_config_path() -> Path:
-    return Path.home() / ".aws" / "config"
+    # Same file the AWS CLI and SDKs read.
+    override = os.environ.get("AWS_CONFIG_FILE")
+    return Path(override).expanduser() if override else Path.home() / ".aws" / "config"
 
 
 def _profile_name(prefix: str, account: Account, role: str, *, all_roles: bool) -> str:
@@ -212,7 +215,10 @@ def sync(
         path.parent.mkdir(parents=True, exist_ok=True)
         if path.exists():
             backup = _backup(path)
-        with path.open("w", encoding="utf-8", newline="") as f:
+        # Write a sibling file and swap it in, so a failed write never truncates the config.
+        tmp = path.with_name(f"{path.name}.ssobroker-tmp")
+        with tmp.open("w", encoding="utf-8", newline="") as f:
             f.write(updated)
+        os.replace(tmp, path)
 
     return SyncResult(written, skipped, conflicts, path, backup)
