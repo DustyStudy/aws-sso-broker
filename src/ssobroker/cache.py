@@ -196,9 +196,9 @@ def put(key: str, value: dict, *, keyring: bool | None = None) -> None:
                     p.unlink()
                 return
             except Exception:
-                if keyring:
-                    return  # keychain was asked for explicitly: don't cache rather than write a file
-                # Otherwise fall back to the file cache below.
+                pass
+        if keyring:
+            return  # keychain was asked for explicitly: don't cache rather than write a file
 
     p = _path_for(key)
     _write_locked_down(p, json.dumps(value))

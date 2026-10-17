@@ -129,3 +129,10 @@ def test_failed_keyring_delete_stays_indexed(tmp_path, monkeypatch):
     cache._keyring_index_add("sso-token_us-east-1_abc")
     cache.clear()
     assert cache.keys("sso-token_") == ["sso-token_us-east-1_abc"]
+
+
+def test_explicit_keyring_without_a_keychain_writes_no_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
+    monkeypatch.setattr(cache, "_keyring_module", lambda: None)
+    cache.put("role-creds_k", {"secret": "x"}, keyring=True)
+    assert not list(cache.cache_dir().glob("role-creds_*.json"))
