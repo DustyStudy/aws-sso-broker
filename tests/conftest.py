@@ -16,6 +16,7 @@ def _no_managed_policy(tmp_path, monkeypatch):
     # doctor scans the AWS CLI's files; never let a test read the real ~/.aws.
     monkeypatch.setattr(exposure, "_aws_dir", lambda: tmp_path / "aws-home")
     monkeypatch.delenv("AWS_SHARED_CREDENTIALS_FILE", raising=False)
+    monkeypatch.delenv("AWS_CONFIG_FILE", raising=False)
     yield
     policy.load.cache_clear()
     audit.configure(audit.AuditSettings())

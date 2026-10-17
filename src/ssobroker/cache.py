@@ -15,6 +15,7 @@ Install the `keyring` extra to enable OS-keychain storage:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import stat
@@ -90,6 +91,9 @@ def _write_locked_down(path: Path, data: str) -> None:
 
 def _path_for(key: str) -> Path:
     safe = "".join(c if c.isalnum() or c in "-_." else "_" for c in key)
+    if safe != key:
+        # Keep keys apart that differ only in replaced characters (Ops+Admin vs Ops_Admin).
+        safe += "_" + hashlib.sha256(key.encode("utf-8")).hexdigest()[:16]
     return cache_dir() / f"{safe}.json"
 
 
@@ -192,7 +196,9 @@ def put(key: str, value: dict, *, keyring: bool | None = None) -> None:
                     p.unlink()
                 return
             except Exception:
-                pass  # fall back to file cache below
+                pass
+        if keyring:
+            return  # keychain was asked for explicitly: don't cache rather than write a file
 
     p = _path_for(key)
     _write_locked_down(p, json.dumps(value))
@@ -200,11 +206,17 @@ def put(key: str, value: dict, *, keyring: bool | None = None) -> None:
 
 def _keyring_delete(key: str) -> None:
     kr = _keyring_module()
-    if kr is not None:
+    if kr is None:
+        return  # keep the index entry so a later clear can still remove it
+    try:
+        kr.delete_password(KEYRING_SERVICE, key)
+    except Exception:
         try:
-            kr.delete_password(KEYRING_SERVICE, key)
+            still_there = kr.get_password(KEYRING_SERVICE, key) is not None
         except Exception:
-            pass
+            still_there = True
+        if still_there:
+            return  # keep it indexed so a later logout finds it again
     _keyring_index_remove(key)
 
 
@@ -234,9 +246,5 @@ def clear(key: str | None = None) -> int:
     for indexed_key in list(_keyring_index()):
         _keyring_delete(indexed_key)
         removed += 1
-
-    idx_path = _keyring_index_path()
-    if idx_path.exists():
-        idx_path.unlink()
 
     return removed

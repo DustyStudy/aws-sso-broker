@@ -205,3 +205,16 @@ def test_example_policy_file_parses():
     root = pathlib.Path(__file__).resolve().parents[1]
     raw = yaml.safe_load((root / "config" / "policy.example.yaml").read_text())
     assert policy.parse(raw, None).allow_device_code is False
+
+
+@pytest.mark.parametrize(
+    "raw",
+    [
+        {"allow_device_code": "false"},
+        {"protected_account_ids": [12345678901]},
+        {"protected_account_ids": False},
+    ],
+)
+def test_parse_fails_closed_on_mistyped_values(raw):
+    with pytest.raises(policy.PolicyError):
+        policy.parse(raw, None)

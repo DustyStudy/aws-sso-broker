@@ -11,7 +11,7 @@ from __future__ import annotations
 
 import fnmatch
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePath
 
 import yaml
 
@@ -48,7 +48,7 @@ class GuardrailConfig:
         return cls(
             deny_patterns=_merge(raw.get("deny_patterns", []), pol.deny_patterns),
             protected_account_ids=_merge(
-                [str(a) for a in raw.get("protected_account_ids", [])],
+                [_account_id(a, path) for a in raw.get("protected_account_ids", [])],
                 pol.protected_account_ids,
             ),
             require_confirmation_patterns=_merge(
@@ -58,6 +58,15 @@ class GuardrailConfig:
             strict_protected_accounts=bool(raw.get("strict_protected_accounts", False))
             or pol.strict_protected_accounts,
         )
+
+
+def _account_id(value: object, path: Path) -> str:
+    try:
+        return policy.account_id(value)
+    except ValueError as e:
+        raise GuardrailBlocked(
+            f"{path}: protected_account_ids: {e}", "protected_account_ids"
+        ) from e
 
 
 def _merge(user: list[str], managed: tuple[str, ...]) -> list[str]:
@@ -95,23 +104,35 @@ def check_protected_account(account_id: str, cfg: GuardrailConfig) -> str | None
     return None
 
 
+def _joined(command: list[str]) -> tuple[str, ...]:
+    """The command as typed, and with argv[0] reduced to its bare name so
+    /usr/local/bin/aws or aws.exe still match patterns that start with "aws"."""
+    if not command:
+        return ("",)
+    name = PurePath(command[0].replace("\\", "/")).name
+    stem, dot, ext = name.rpartition(".")
+    if dot and ext.lower() in ("exe", "cmd", "bat"):
+        name = stem
+    return (" ".join(command), " ".join([name, *command[1:]]))
+
+
 def check_command(command: list[str], account_id: str, cfg: GuardrailConfig) -> str | None:
     """Return a block reason string if the command should be denied, else None."""
     protected_reason = check_protected_account(account_id, cfg)
     if protected_reason:
         return protected_reason
 
-    joined = " ".join(command)
+    forms = _joined(command)
     for pattern in _BUILTIN_DENY + cfg.deny_patterns:
-        if fnmatch.fnmatch(joined, pattern):
+        if any(fnmatch.fnmatch(form, pattern) for form in forms):
             return f"Command matches deny pattern: '{pattern}'"
 
     return None
 
 
 def needs_confirmation(command: list[str], cfg: GuardrailConfig) -> str | None:
-    joined = " ".join(command)
+    forms = _joined(command)
     for pattern in cfg.require_confirmation_patterns:
-        if fnmatch.fnmatch(joined, pattern):
+        if any(fnmatch.fnmatch(form, pattern) for form in forms):
             return pattern
     return None

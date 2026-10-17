@@ -313,6 +313,8 @@ class _CallbackResult:
 
 def _make_handler(result: _CallbackResult):
     class _Handler(BaseHTTPRequestHandler):
+        timeout = 10  # an idle loopback connection must not block the login timeout
+
         def do_GET(self) -> None:  # noqa: N802 — http.server naming
             parsed = urlparse(self.path)
             if parsed.path != _CALLBACK_PATH:
