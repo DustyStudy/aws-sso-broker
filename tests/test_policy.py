@@ -209,7 +209,11 @@ def test_example_policy_file_parses():
 
 @pytest.mark.parametrize(
     "raw",
-    [{"allow_device_code": "false"}, {"protected_account_ids": [12345678901]}],
+    [
+        {"allow_device_code": "false"},
+        {"protected_account_ids": [12345678901]},
+        {"protected_account_ids": False},
+    ],
 )
 def test_parse_fails_closed_on_mistyped_values(raw):
     with pytest.raises(policy.PolicyError):

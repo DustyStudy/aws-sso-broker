@@ -141,14 +141,18 @@ def _bool(raw: dict, key: str, default: bool) -> bool:
 
 
 def _str_tuple(raw: dict, key: str) -> tuple[str, ...]:
-    value = raw.get(key) or []
+    value = raw.get(key)
+    if value is None:
+        value = []
     if not isinstance(value, list):
         raise PolicyError(f"Managed policy field '{key}' must be a list.")
     return tuple(str(v) for v in value)
 
 
 def _account_ids(raw: dict, key: str) -> tuple[str, ...]:
-    value = raw.get(key) or []
+    value = raw.get(key)
+    if value is None:
+        value = []
     if not isinstance(value, list):
         raise PolicyError(f"Managed policy field '{key}' must be a list.")
     try:

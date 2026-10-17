@@ -104,16 +104,16 @@ def check_protected_account(account_id: str, cfg: GuardrailConfig) -> str | None
     return None
 
 
-def _joined(command: list[str]) -> str:
-    """The command as one string, with argv[0] reduced to its bare name so
+def _joined(command: list[str]) -> tuple[str, ...]:
+    """The command as typed, and with argv[0] reduced to its bare name so
     /usr/local/bin/aws or aws.exe still match patterns that start with "aws"."""
     if not command:
-        return ""
+        return ("",)
     name = PurePath(command[0].replace("\\", "/")).name
     stem, dot, ext = name.rpartition(".")
     if dot and ext.lower() in ("exe", "cmd", "bat"):
         name = stem
-    return " ".join([name, *command[1:]])
+    return (" ".join(command), " ".join([name, *command[1:]]))
 
 
 def check_command(command: list[str], account_id: str, cfg: GuardrailConfig) -> str | None:
@@ -122,17 +122,17 @@ def check_command(command: list[str], account_id: str, cfg: GuardrailConfig) -> 
     if protected_reason:
         return protected_reason
 
-    joined = _joined(command)
+    forms = _joined(command)
     for pattern in _BUILTIN_DENY + cfg.deny_patterns:
-        if fnmatch.fnmatch(joined, pattern):
+        if any(fnmatch.fnmatch(form, pattern) for form in forms):
             return f"Command matches deny pattern: '{pattern}'"
 
     return None
 
 
 def needs_confirmation(command: list[str], cfg: GuardrailConfig) -> str | None:
-    joined = _joined(command)
+    forms = _joined(command)
     for pattern in cfg.require_confirmation_patterns:
-        if fnmatch.fnmatch(joined, pattern):
+        if any(fnmatch.fnmatch(form, pattern) for form in forms):
             return pattern
     return None

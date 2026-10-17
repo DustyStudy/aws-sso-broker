@@ -122,3 +122,8 @@ def test_unquoted_octal_protected_account_id_is_rejected(tmp_path):
     p.write_text("protected_account_ids: [012345670123]\n")
     with pytest.raises(guardrails.GuardrailBlocked, match="12 digits"):
         guardrails.GuardrailConfig.load(p)
+
+
+def test_path_specific_deny_pattern_still_matches():
+    cfg = guardrails.GuardrailConfig(deny_patterns=["/opt/legacy/aws *"])
+    assert guardrails.check_command(["/opt/legacy/aws", "s3", "ls"], "222222222222", cfg)

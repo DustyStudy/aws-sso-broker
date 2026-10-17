@@ -15,6 +15,7 @@ from __future__ import annotations
 import os
 import re
 import shutil
+import tempfile
 import time
 from pathlib import Path
 from typing import NamedTuple
@@ -216,9 +217,15 @@ def sync(
         if path.exists():
             backup = _backup(path)
         # Write a sibling file and swap it in, so a failed write never truncates the config.
-        tmp = path.with_name(f"{path.name}.ssobroker-tmp")
-        with tmp.open("w", encoding="utf-8", newline="") as f:
-            f.write(updated)
-        os.replace(tmp, path)
+        fd, tmp = tempfile.mkstemp(dir=path.parent, prefix=f".{path.name}.")
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8", newline="") as f:
+                f.write(updated)
+            if backup:
+                shutil.copymode(backup, tmp)  # keep e.g. 0600
+            os.replace(tmp, path)
+        except BaseException:
+            os.unlink(tmp)
+            raise
 
     return SyncResult(written, skipped, conflicts, path, backup)

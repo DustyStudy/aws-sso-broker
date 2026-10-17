@@ -28,7 +28,7 @@ AUDIT_FORWARDERS = ("syslog", "eventlog", "cloudwatch")
 # Permission-set name characters. Aliases and roles end up in ~/.aws/config
 # section headers and credential_process command lines, so nothing else is allowed.
 _NAME_RE = re.compile(r"[A-Za-z0-9+=,.@_-]+")
-_REGION_RE = re.compile(r"[a-z]{2}(-[a-z]+)+-\d")
+_REGION_RE = re.compile(r"[a-z]{2,4}(-[a-z]+)+-\d+")  # incl. eusc-de-east-1
 
 
 class ConfigError(RuntimeError):
