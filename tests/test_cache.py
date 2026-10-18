@@ -166,6 +166,10 @@ def test_windows_state_folder_gets_a_private_acl(tmp_path, monkeypatch):
     icacls(str(home), "/grant", "*S-1-1-0:(OI)(CI)R")
     cache.cache_dir()
     assert_private()
+    # Only a file loosened, folder still right: the file is fixed too.
+    icacls(str(home / "audit.log"), "/grant", "*S-1-1-0:R")
+    cache.cache_dir()
+    assert_private()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need admin on Windows")

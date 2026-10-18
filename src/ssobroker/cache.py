@@ -161,14 +161,17 @@ if sys.platform == "win32":
             sid = _current_user_sid()
             want = sorted([f"A;OICI;FA;;;{sid}", "A;OICI;FA;;;SY"])
             current = _dacl_sddl(base)
-            if current.startswith("D:P") and sorted(_ACE_RE.findall(current)) == want:
-                return
-            _set_dacl(base, "D:P" + "".join(f"({ace})" for ace in want), _PROTECTED_DACL)
-            # Files with their own explicit or protected ACL don't take the new
-            # one by inheritance alone: reset each to "inherit only".
+            if not (current.startswith("D:P") and sorted(_ACE_RE.findall(current)) == want):
+                _set_dacl(base, "D:P" + "".join(f"({ace})" for ace in want), _PROTECTED_DACL)
+            # Files with their own explicit or protected ACL don't take the base
+            # one by inheritance alone: reset any such file to "inherit only".
             for root, dirs, files in os.walk(base):
                 for name in [*dirs, *files]:
-                    _set_dacl(Path(root) / name, "D:AI", _UNPROTECTED_DACL)
+                    path = Path(root) / name
+                    sddl = _dacl_sddl(path)
+                    aces = _ACE_RE.findall(sddl)
+                    if sddl.startswith("D:P") or any("ID" not in a.split(";")[1] for a in aces):
+                        _set_dacl(path, "D:AI", _UNPROTECTED_DACL)
         except (OSError, subprocess.CalledProcessError) as e:
             print(f"ssobroker: could not restrict access to {base}: {e}", file=sys.stderr)
 
