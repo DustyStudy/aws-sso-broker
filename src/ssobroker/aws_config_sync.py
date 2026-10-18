@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import tempfile
 import time
@@ -96,6 +97,21 @@ def _managed_profiles_for(
                 "region": cfg.default_region,
             }
     return profiles, skipped
+
+
+def _profile_id(section_name: str) -> str | None:
+    """The profile a section header defines, parsed the way botocore does, so
+    [default], [profile default] and [profile "default"] are one profile.
+    None for sections that aren't profiles (sso-session, services, ...)."""
+    if section_name == "default":
+        return "default"
+    if not section_name.startswith("profile"):
+        return None
+    try:
+        parts = shlex.split(section_name)
+    except ValueError:
+        return None
+    return parts[1] if len(parts) == 2 else None
 
 
 class _Section:
@@ -187,7 +203,7 @@ def sync(
     new_blocks: list[list[str]] = []
     for name, settings in desired.items():
         section_name = f"profile {name}"
-        existing = [s for s in sections if s.name == section_name]
+        existing = [s for s in sections if _profile_id(s.name) == name]
         if any(not s.managed for s in existing):
             # Pre-existing, not ours — never touch it.
             conflicts.append(name)
@@ -196,6 +212,9 @@ def sync(
         if existing:
             target = existing[0]
             target.lines = block + _trailing_gap(target.lines)
+            for extra in existing[1:]:
+                # e.g. ours as [profile "x"] and [profile x]: keep one, or botocore errors.
+                extra.lines = _trailing_gap(extra.lines)
         else:
             new_blocks.append(block)
         written.append(name)

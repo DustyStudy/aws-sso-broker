@@ -136,3 +136,61 @@ def test_explicit_keyring_without_a_keychain_writes_no_file(tmp_path, monkeypatc
     monkeypatch.setattr(cache, "_keyring_module", lambda: None)
     cache.put("role-creds_k", {"secret": "x"}, keyring=True)
     assert not list(cache.cache_dir().glob("role-creds_*.json"))
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows ACLs")
+def test_windows_state_folder_gets_a_private_acl(tmp_path, monkeypatch):
+    import subprocess
+
+    def icacls(*args):
+        return subprocess.run(["icacls", *args], capture_output=True, text=True, check=True).stdout
+
+    home = tmp_path / "home"
+    (home / "cache").mkdir(parents=True)
+    (home / "audit.log").write_text("from before the ACL")
+    (home / "explicit.txt").write_text("x")
+    icacls(str(home / "explicit.txt"), "/grant", "*S-1-1-0:R")  # explicit Everyone
+    (home / "protected.txt").write_text("x")
+    icacls(str(home / "protected.txt"), "/inheritance:d")  # keeps a copy, blocks inheritance
+    monkeypatch.setenv("SSOBROKER_HOME", str(home))
+
+    def assert_private():
+        acl = icacls(str(home), "/T")
+        assert "audit.log" in acl and "protected.txt" in acl
+        for broad in ("Everyone", "BUILTIN\\Users", "Authenticated Users"):
+            assert broad not in acl
+
+    cache.put("mykey", {"value": 1})
+    assert_private()
+    # Loosened later (e.g. restored from a copy): the next run puts it back.
+    icacls(str(home), "/grant", "*S-1-1-0:(OI)(CI)R")
+    cache.cache_dir()
+    assert_private()
+    # Only a file loosened, folder still right: the file is fixed too.
+    icacls(str(home / "audit.log"), "/grant", "*S-1-1-0:R")
+    cache.cache_dir()
+    assert_private()
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need admin on Windows")
+def test_put_never_writes_through_a_planted_symlink(tmp_path, monkeypatch):
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path / "home"))
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me")
+    (cache.cache_dir() / "mykey.json").symlink_to(victim)
+    cache.put("mykey", {"value": 1})
+    assert victim.read_text() == "keep me"
+    assert cache.get("mykey") == {"value": 1}
+
+
+def test_concurrent_keyring_index_adds_keep_every_entry(tmp_path, monkeypatch):
+    import threading
+
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
+    keys = [f"sso-token_r_{i}" for i in range(20)]
+    threads = [threading.Thread(target=cache._keyring_index_add, args=(k,)) for k in keys]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert cache.keys("sso-token_") == sorted(keys)

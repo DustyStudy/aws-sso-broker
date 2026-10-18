@@ -311,7 +311,7 @@ class _CallbackResult:
         self.done = threading.Event()
 
 
-def _make_handler(result: _CallbackResult):
+def _make_handler(result: _CallbackResult, state: str):
     class _Handler(BaseHTTPRequestHandler):
         timeout = 10  # an idle loopback connection must not block the login timeout
 
@@ -321,9 +321,14 @@ def _make_handler(result: _CallbackResult):
                 self.send_response(404)
                 self.end_headers()
                 return
-            query = parse_qs(parsed.query)
-            result.params = {k: v[0] for k, v in query.items()}
-            ok = "code" in result.params
+            params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
+            if not hmac.compare_digest(params.get("state", "").encode(), state.encode()):
+                # Not our sign-in (another page or process): ignore it and keep waiting.
+                self.send_response(400)
+                self.end_headers()
+                return
+            result.params = params
+            ok = "code" in params
             self.send_response(200)
             self.send_header("Content-Type", "text/html; charset=utf-8")
             self.send_header("Cache-Control", "no-store")
@@ -346,7 +351,7 @@ def _auth_code_flow(
     state = secrets.token_urlsafe(32)
 
     result = _CallbackResult()
-    server = HTTPServer(("127.0.0.1", 0), _make_handler(result))
+    server = HTTPServer(("127.0.0.1", 0), _make_handler(result, state))
     port = server.server_address[1]
     redirect_uri = f"http://127.0.0.1:{port}{_CALLBACK_PATH}"
     thread = threading.Thread(target=server.serve_forever, daemon=True)
@@ -378,7 +383,7 @@ def _auth_code_flow(
         server.server_close()
 
     params = result.params or {}
-    if not hmac.compare_digest(params.get("state", ""), state):
+    if not hmac.compare_digest(params.get("state", "").encode(), state.encode()):
         raise SsoLoginError("Sign-in response had the wrong state parameter; ignoring it.")
     if "error" in params:
         raise SsoLoginError(f"SSO sign-in failed: {params['error']}")

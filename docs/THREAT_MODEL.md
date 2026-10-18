@@ -64,7 +64,9 @@ available, the SSO token isn't even on disk in a form the attacker can
 read without also compromising the OS-level keychain protections (e.g. the
 user's login password, on most desktop keychains). When it isn't (headless
 Linux with no keychain, `keyring` extra not installed), the fallback cache
-file is created 0600 and every read checks expiry before trusting it.
+file is created 0600 (on Windows, the `~/.ssobroker` folder gets an ACL that
+grants only the user and SYSTEM, re-checked on every run; not applied when the
+folder is on a network drive) and every read checks expiry before trusting it.
 
 **Residual risk:** if the attacker gets the disk *and* an unlocked session
 (or the keychain unlock secret) within the credential's remaining lifetime,
