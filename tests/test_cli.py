@@ -270,6 +270,13 @@ def test_logout_local_only_never_calls_aws(monkeypatch):
     assert result.exit_code == 0
 
 
+def test_logout_warns_when_keychain_entries_remain(monkeypatch):
+    monkeypatch.setattr(cli.cache, "clear", lambda: 0)
+    monkeypatch.setattr(cli.cache, "keyring_leftovers", lambda: 2, raising=False)
+    result = invoke("logout", "--local-only")
+    assert "2 keychain entries could not be removed" in result.output
+
+
 def test_invalid_managed_policy_stops_every_command(monkeypatch, tmp_path):
     from conftest import write_policy
 

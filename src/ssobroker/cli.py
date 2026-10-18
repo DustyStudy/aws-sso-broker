@@ -247,6 +247,12 @@ def logout(local_only: bool):
             pass  # network settings are optional here; logout must still work
         n, errors = sso.logout()
     console.print(f"Cleared {n} cached entr{'y' if n == 1 else 'ies'}.")
+    left = cache.keyring_leftovers()
+    if left:
+        console.print(
+            f"[yellow]{left} keychain entr{'y' if left == 1 else 'ies'} could not be removed "
+            "(keychain locked or unavailable); run logout again once it is unlocked.[/yellow]"
+        )
     for err in errors:
         console.print(f"[yellow]Server-side sign-out failed ({err}); local cache cleared.[/yellow]")
 

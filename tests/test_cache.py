@@ -131,6 +131,16 @@ def test_failed_keyring_delete_stays_indexed(tmp_path, monkeypatch):
     assert cache.keys("sso-token_") == ["sso-token_us-east-1_abc"]
 
 
+def test_failed_keyring_delete_is_not_counted_as_removed(tmp_path, monkeypatch):
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
+    cache._keyring_index_add("sso-token_us-east-1_abc")
+    for kr in (_BrokenKeyring(), None):  # locked keychain, then no keychain at all
+        monkeypatch.setattr(cache, "_keyring_module", lambda kr=kr: kr)
+        assert cache.clear() == 0
+        assert cache.clear("sso-token_us-east-1_abc") == 0
+    assert cache.keyring_leftovers() == 1
+
+
 def test_explicit_keyring_without_a_keychain_writes_no_file(tmp_path, monkeypatch):
     monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
     monkeypatch.setattr(cache, "_keyring_module", lambda: None)

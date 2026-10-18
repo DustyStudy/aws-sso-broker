@@ -227,6 +227,55 @@ def test_logout_clears_locally_even_if_aws_unreachable(monkeypatch):
     assert errors and "InternalServerError" in errors[0]
 
 
+class ExpiredAccessPortal:
+    """Rejects the stale access token at Logout but accepts a refreshed one."""
+
+    def __init__(self, refresh_error: str | None = None):
+        self.logged_out: list[str] = []
+        self.refresh_error = refresh_error
+
+    def create_token(self, **kwargs):
+        if self.refresh_error:
+            raise ClientError(
+                {"Error": {"Code": self.refresh_error, "Message": "x"}}, "CreateToken"
+            )
+        return {"accessToken": "refreshed", "expiresIn": 3600, "refreshToken": "rt2"}
+
+    def logout(self, accessToken):
+        if accessToken == "old-access":
+            raise ClientError(
+                {"Error": {"Code": "UnauthorizedException", "Message": "x"}}, "Logout"
+            )
+        self.logged_out.append(accessToken)
+
+
+def test_logout_refreshes_an_expired_access_token_to_end_the_session(monkeypatch):
+    portal = ExpiredAccessPortal()
+    monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: portal)
+    _cache_refreshable(issued_ago=2 * 3600, access_left=-10)
+    _, errors = sso.logout()
+    assert portal.logged_out == ["refreshed"]
+    assert errors == []
+
+
+def test_logout_with_a_dead_refresh_token_is_not_an_error(monkeypatch):
+    monkeypatch.setattr(
+        sso.boto3, "client", lambda *a, **k: ExpiredAccessPortal("InvalidGrantException")
+    )
+    _cache_refreshable(issued_ago=2 * 3600, access_left=-10)
+    _, errors = sso.logout()
+    assert errors == []
+
+
+def test_logout_reports_a_refresh_token_it_could_not_revoke(monkeypatch):
+    monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: ExpiredAccessPortal())
+    _cache_refreshable(issued_ago=2 * 3600, access_left=-10)
+    cache.clear(sso._client_cache_key(START_URL, REGION, "auth_code"))
+    cleared, errors = sso.logout()
+    assert cleared == 1
+    assert errors and "refresh token" in errors[0]
+
+
 # --- role credential cache --------------------------------------------------------
 
 
