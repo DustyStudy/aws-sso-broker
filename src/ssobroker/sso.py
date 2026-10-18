@@ -322,7 +322,7 @@ def _make_handler(result: _CallbackResult, state: str):
                 self.end_headers()
                 return
             params = {k: v[0] for k, v in parse_qs(parsed.query).items()}
-            if not hmac.compare_digest(params.get("state", ""), state):
+            if not hmac.compare_digest(params.get("state", "").encode(), state.encode()):
                 # Not our sign-in (another page or process): ignore it and keep waiting.
                 self.send_response(400)
                 self.end_headers()
@@ -383,7 +383,7 @@ def _auth_code_flow(
         server.server_close()
 
     params = result.params or {}
-    if not hmac.compare_digest(params.get("state", ""), state):
+    if not hmac.compare_digest(params.get("state", "").encode(), state.encode()):
         raise SsoLoginError("Sign-in response had the wrong state parameter; ignoring it.")
     if "error" in params:
         raise SsoLoginError(f"SSO sign-in failed: {params['error']}")

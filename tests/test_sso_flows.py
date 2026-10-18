@@ -126,7 +126,7 @@ def test_auth_code_flow_survives_a_forged_callback_first(monkeypatch):
         redirect = urlparse(q["redirect_uri"])
 
         def _call():
-            for state in ("forged", q["state"]):
+            for state in ("forged", "é", q["state"]):
                 conn = http.client.HTTPConnection(redirect.hostname, redirect.port, timeout=5)
                 conn.request("GET", f"{redirect.path}?{urlencode({'code': state, 'state': state})}")
                 conn.getresponse().read()

@@ -315,6 +315,7 @@ def test_sync_honors_aws_config_file(monkeypatch, tmp_path):
     ("alias", "existing"),
     [
         ("prod", '[profile "prod"]\nregion = eu-west-1\n'),
+        ("prod", "[profile 'prod']\nregion = eu-west-1\n"),
         ("default", "[default]\nregion = eu-west-1\n"),
     ],
 )
@@ -326,3 +327,25 @@ def test_equivalent_unmanaged_profile_header_is_a_conflict(monkeypatch, tmp_path
     result = aws_config_sync.sync(cfg)
     assert result.conflicts == [alias]
     assert target.read_text() == existing
+
+
+def test_non_profile_section_with_the_same_name_is_not_a_conflict(monkeypatch, tmp_path):
+    target = tmp_path / "config"
+    target.write_text("[prod]\nkey = value\n")
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(target))
+    cfg = _cfg(prod=Account(alias="prod", account_id="111111111111", roles=["ro"]))
+    assert aws_config_sync.sync(cfg).conflicts == []
+
+
+def test_equivalent_managed_sections_collapse_into_one(monkeypatch, tmp_path):
+    target = tmp_path / "config"
+    target.write_text(
+        '[profile "prod"]\nregion = x\n_ssobroker_managed = true\n\n'
+        "[profile prod]\nregion = y\n_ssobroker_managed = true\n"
+    )
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(target))
+    cfg = _cfg(prod=Account(alias="prod", account_id="111111111111", roles=["ro"]))
+    aws_config_sync.sync(cfg)
+    parser = configparser.ConfigParser()
+    parser.read(target)  # raises DuplicateSectionError if two remain
+    assert parser.sections() == ["profile prod"]

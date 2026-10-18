@@ -25,6 +25,7 @@ that would defeat the point of it.
 from __future__ import annotations
 
 import os
+import re
 import stat
 import sys
 from dataclasses import dataclass
@@ -108,7 +109,8 @@ if sys.platform == "win32":
 
 
 def normalize_start_url(url: str) -> str:
-    return url.strip().rstrip("/").lower()
+    # One pass over trailing slashes and spaces together, so "x /" and "x" agree.
+    return re.sub(r"[\s/]+$", "", url.strip()).lower()
 
 
 def _check_trusted(path: Path) -> None:

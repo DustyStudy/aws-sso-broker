@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import os
 import re
+import shlex
 import shutil
 import tempfile
 import time
@@ -98,18 +99,19 @@ def _managed_profiles_for(
     return profiles, skipped
 
 
-def _profile_id(section_name: str) -> str:
-    """The profile a section header defines, the way the AWS CLI reads it:
-    [default], [profile default] and [profile "default"] are all one profile."""
+def _profile_id(section_name: str) -> str | None:
+    """The profile a section header defines, parsed the way botocore does, so
+    [default], [profile default] and [profile "default"] are one profile.
+    None for sections that aren't profiles (sso-session, services, ...)."""
     if section_name == "default":
         return "default"
-    kind, _, rest = section_name.partition(" ")
-    if kind != "profile":
-        return section_name  # sso-session, services, ...: not a profile
-    rest = rest.strip()
-    if len(rest) >= 2 and rest[0] == rest[-1] == '"':
-        rest = rest[1:-1]
-    return rest
+    if not section_name.startswith("profile"):
+        return None
+    try:
+        parts = shlex.split(section_name)
+    except ValueError:
+        return None
+    return parts[1] if len(parts) == 2 else None
 
 
 class _Section:
@@ -210,6 +212,9 @@ def sync(
         if existing:
             target = existing[0]
             target.lines = block + _trailing_gap(target.lines)
+            for extra in existing[1:]:
+                # e.g. ours as [profile "x"] and [profile x]: keep one, or botocore errors.
+                extra.lines = _trailing_gap(extra.lines)
         else:
             new_blocks.append(block)
         written.append(name)

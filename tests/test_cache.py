@@ -142,18 +142,30 @@ def test_explicit_keyring_without_a_keychain_writes_no_file(tmp_path, monkeypatc
 def test_windows_state_folder_gets_a_private_acl(tmp_path, monkeypatch):
     import subprocess
 
+    def icacls(*args):
+        return subprocess.run(["icacls", *args], capture_output=True, text=True, check=True).stdout
+
     home = tmp_path / "home"
     (home / "cache").mkdir(parents=True)
     (home / "audit.log").write_text("from before the ACL")
+    (home / "explicit.txt").write_text("x")
+    icacls(str(home / "explicit.txt"), "/grant", "*S-1-1-0:R")  # explicit Everyone
+    (home / "protected.txt").write_text("x")
+    icacls(str(home / "protected.txt"), "/inheritance:d")  # keeps a copy, blocks inheritance
     monkeypatch.setenv("SSOBROKER_HOME", str(home))
+
+    def assert_private():
+        acl = icacls(str(home), "/T")
+        assert "audit.log" in acl and "protected.txt" in acl
+        for broad in ("Everyone", "BUILTIN\\Users", "Authenticated Users"):
+            assert broad not in acl
+
     cache.put("mykey", {"value": 1})
-    acl = subprocess.run(
-        ["icacls", str(home), "/T"], capture_output=True, text=True, check=True
-    ).stdout
-    assert "audit.log" in acl
-    assert cache._current_user_sid() not in ("", None)
-    for broad in ("Everyone", "BUILTIN\\Users", "Authenticated Users"):
-        assert broad not in acl
+    assert_private()
+    # Loosened later (e.g. restored from a copy): the next run puts it back.
+    icacls(str(home), "/grant", "*S-1-1-0:(OI)(CI)R")
+    cache.cache_dir()
+    assert_private()
 
 
 @pytest.mark.skipif(sys.platform == "win32", reason="symlinks need admin on Windows")

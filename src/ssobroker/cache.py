@@ -20,6 +20,7 @@ import functools
 import hashlib
 import json
 import os
+import re
 import secrets
 import stat
 import subprocess
@@ -65,58 +66,111 @@ def cache_dir() -> Path:
     _lock_down(base)
     _lock_down(d)
     if sys.platform == "win32":
-        _private_acl_once(base)
+        _ensure_private_acl(base)
     return d
 
 
-_ACL_MARKER = ".private-acl"
+if sys.platform == "win32":
+    import ctypes
+    from ctypes import wintypes
 
+    _advapi32 = ctypes.WinDLL("advapi32", use_last_error=True)
+    _kernel32 = ctypes.WinDLL("kernel32", use_last_error=True)
+    _kernel32.LocalFree.argtypes = [ctypes.c_void_p]
+    _kernel32.LocalFree.restype = ctypes.c_void_p
+    _SE_FILE_OBJECT = 1
+    _DACL_INFO = 0x4
+    _PROTECTED_DACL = 0x80000000
+    _UNPROTECTED_DACL = 0x20000000
+    _SDDL_REVISION_1 = 1
+    _DRIVE_REMOTE = 4
+    _ACE_RE = re.compile(r"\(([^)]*)\)")
 
-def _system32(exe: str) -> str:
-    return os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", exe)
+    @functools.cache
+    def _current_user_sid() -> str:
+        out = subprocess.run(
+            [
+                os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "whoami.exe"),
+                "/user",
+                "/fo",
+                "csv",
+                "/nh",
+            ],
+            capture_output=True,
+            text=True,
+            check=True,
+        ).stdout
+        return out.strip().split(",")[-1].strip('"')
 
+    def _dacl_sddl(path: Path) -> str:
+        sd = ctypes.c_void_p()
+        err = _advapi32.GetNamedSecurityInfoW(
+            str(path), _SE_FILE_OBJECT, _DACL_INFO, None, None, None, None, ctypes.byref(sd)
+        )
+        if err:
+            raise ctypes.WinError(err)
+        try:
+            text = ctypes.c_wchar_p()
+            if not _advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW(
+                sd, _SDDL_REVISION_1, _DACL_INFO, ctypes.byref(text), None
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+            try:
+                return str(text.value)
+            finally:
+                _kernel32.LocalFree(text)
+        finally:
+            _kernel32.LocalFree(sd)
 
-@functools.cache
-def _current_user_sid() -> str:
-    out = subprocess.run(
-        [_system32("whoami.exe"), "/user", "/fo", "csv", "/nh"],
-        capture_output=True,
-        text=True,
-        check=True,
-    ).stdout
-    return out.strip().split(",")[-1].strip('"')
-
-
-def _private_acl_once(base: Path) -> None:
-    """chmod can't restrict readers on Windows, so give the state folder (and
-    everything in it) an ACL that grants only this user and SYSTEM, replacing
-    whatever it inherited. Done once per folder; a marker file records it."""
-    marker = base / _ACL_MARKER
-    if marker.exists():
-        return
-    try:
-        sid = _current_user_sid()
-        # Grant first, then drop inheritance: the other order briefly leaves an
-        # empty ACL that locks out a second ssobroker process starting at the same time.
-        for step in (
-            ["/grant:r", f"*{sid}:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F"],
-            ["/inheritance:r"],
+    def _set_dacl(path: Path, sddl: str, flags: int) -> None:
+        """Replace the DACL of `path` in one call, so it is never briefly empty."""
+        sd = ctypes.c_void_p()
+        if not _advapi32.ConvertStringSecurityDescriptorToSecurityDescriptorW(
+            sddl, _SDDL_REVISION_1, ctypes.byref(sd), None
         ):
-            result = subprocess.run(
-                # No /T: Windows passes the inheritable ACEs down to existing files itself.
-                [_system32("icacls.exe"), str(base), *step, "/Q"],
-                capture_output=True,
-                text=True,
+            raise ctypes.WinError(ctypes.get_last_error())
+        try:
+            present, defaulted = wintypes.BOOL(), wintypes.BOOL()
+            dacl = ctypes.c_void_p()
+            if not _advapi32.GetSecurityDescriptorDacl(
+                sd, ctypes.byref(present), ctypes.byref(dacl), ctypes.byref(defaulted)
+            ):
+                raise ctypes.WinError(ctypes.get_last_error())
+            err = _advapi32.SetNamedSecurityInfoW(
+                str(path), _SE_FILE_OBJECT, _DACL_INFO | flags, None, None, dacl, None
             )
-            if result.returncode != 0:
-                raise OSError((result.stderr or result.stdout).strip())
-    except (OSError, subprocess.CalledProcessError) as e:
-        print(f"ssobroker: could not restrict access to {base}: {e}", file=sys.stderr)
-        return
-    try:
-        marker.touch()
-    except OSError:
-        pass  # another process is applying it right now; the next run checks again
+            if err:
+                raise ctypes.WinError(err)
+        finally:
+            _kernel32.LocalFree(sd)
+
+    def _on_network_drive(path: Path) -> bool:
+        drive = os.path.splitdrive(os.path.abspath(path))[0]
+        return drive.startswith("\\\\") or (_kernel32.GetDriveTypeW(drive + "\\") == _DRIVE_REMOTE)
+
+    def _ensure_private_acl(base: Path) -> None:
+        """chmod can't restrict readers on Windows. Give the state folder an
+        exact, non-inherited ACL (this user and SYSTEM, full control) and make
+        everything in it inherit only that. Checked on every run, so a copy or
+        restore that loosened it gets fixed. Skipped on network drives, where
+        the share may know this user under another identity and the ACL could
+        lock them out."""
+        try:
+            if _on_network_drive(base):
+                return
+            sid = _current_user_sid()
+            want = sorted([f"A;OICI;FA;;;{sid}", "A;OICI;FA;;;SY"])
+            current = _dacl_sddl(base)
+            if current.startswith("D:P") and sorted(_ACE_RE.findall(current)) == want:
+                return
+            _set_dacl(base, "D:P" + "".join(f"({ace})" for ace in want), _PROTECTED_DACL)
+            # Files with their own explicit or protected ACL don't take the new
+            # one by inheritance alone: reset each to "inherit only".
+            for root, dirs, files in os.walk(base):
+                for name in [*dirs, *files]:
+                    _set_dacl(Path(root) / name, "D:AI", _UNPROTECTED_DACL)
+        except (OSError, subprocess.CalledProcessError) as e:
+            print(f"ssobroker: could not restrict access to {base}: {e}", file=sys.stderr)
 
 
 def _lock_down(path: Path) -> None:
@@ -136,7 +190,7 @@ def _write_locked_down(path: Path, data: str) -> None:
     chmod'ing afterward. The data goes to a new temp file (O_EXCL, so never
     through a planted symlink) that then replaces `path`, so a reader never
     sees half a file. On Windows the folder ACL does the restricting (see
-    _private_acl_once)."""
+    _ensure_private_acl)."""
     tmp = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
     fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     try:
