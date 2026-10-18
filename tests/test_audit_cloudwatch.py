@@ -270,12 +270,32 @@ def test_backfill_batches_stay_under_the_request_size_limit(monkeypatch):
 
 
 def test_events_rejected_by_cloudwatch_are_reported(monkeypatch, capsys):
-    fake = _FakeLogs({"rejectedLogEventsInfo": {"expiredLogEventEndIndex": 1}})
+    # End indexes are exclusive, the start index inclusive: events 0-1 too
+    # old/expired, event 3 too new.
+    info = {
+        "tooOldLogEventEndIndex": 1,
+        "expiredLogEventEndIndex": 2,
+        "tooNewLogEventStartIndex": 3,
+    }
+    fake = _FakeLogs({"rejectedLogEventsInfo": info})
     monkeypatch.setattr(boto3, "client", lambda *a, **k: fake)
-    _write_log([{"ts": _ts(time.time()), "action": "exec"} for _ in range(3)])
+    _write_log([{"ts": _ts(time.time()), "action": "exec"} for _ in range(4)])
 
     audit.push_to_cloudwatch(LOG_GROUP, REGION)
-    assert "2 audit entries were rejected" in capsys.readouterr().err
+    assert "CloudWatch rejected 3 audit entries" in capsys.readouterr().err
+
+
+def test_an_entry_too_large_for_cloudwatch_is_skipped_not_stuck(monkeypatch, capsys):
+    fake = _FakeLogs()
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: fake)
+    now = _ts(time.time())
+    _write_log([{"ts": now, "detail": "x" * 1_048_576}, {"ts": now, "action": "exec"}])
+
+    assert audit.push_to_cloudwatch(LOG_GROUP, REGION) == 1
+    (batch,) = fake.batches
+    assert json.loads(batch[0]["message"])["action"] == "exec"
+    assert "too large" in capsys.readouterr().err
+    assert audit.push_to_cloudwatch(LOG_GROUP, REGION) == 0  # cursor moved on
 
 
 def test_direct_push_also_marks_forwarding_for_credential_processes(monkeypatch):

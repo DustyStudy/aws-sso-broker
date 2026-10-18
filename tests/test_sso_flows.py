@@ -233,8 +233,10 @@ class ExpiredAccessPortal:
     def __init__(self, refresh_error: str | None = None):
         self.logged_out: list[str] = []
         self.refresh_error = refresh_error
+        self.refreshes = 0
 
     def create_token(self, **kwargs):
+        self.refreshes += 1
         if self.refresh_error:
             raise ClientError(
                 {"Error": {"Code": self.refresh_error, "Message": "x"}}, "CreateToken"
@@ -259,11 +261,22 @@ def test_logout_refreshes_an_expired_access_token_to_end_the_session(monkeypatch
 
 
 def test_logout_with_a_dead_refresh_token_is_not_an_error(monkeypatch):
-    monkeypatch.setattr(
-        sso.boto3, "client", lambda *a, **k: ExpiredAccessPortal("InvalidGrantException")
-    )
+    portal = ExpiredAccessPortal("InvalidGrantException")
+    monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: portal)
     _cache_refreshable(issued_ago=2 * 3600, access_left=-10)
     _, errors = sso.logout()
+    assert portal.refreshes == 1
+    assert errors == []
+
+
+def test_logout_ends_a_session_past_the_local_session_cap(monkeypatch):
+    # The local cap (8h here) can be shorter than the Identity Center session,
+    # so the refresh token may still work at AWS after the cache entry expired.
+    portal = ExpiredAccessPortal()
+    monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: portal)
+    _cache_refreshable(issued_ago=9 * 3600, access_left=-3600)
+    _, errors = sso.logout()
+    assert portal.logged_out == ["refreshed"]
     assert errors == []
 
 

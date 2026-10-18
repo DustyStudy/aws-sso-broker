@@ -415,7 +415,9 @@ def logout() -> tuple[int, list[str]]:
     """
     errors: list[str] = []
     for key in cache.keys("sso-token_"):
-        data = cache.get(key)
+        # Past the local session cap the Identity Center session (and its
+        # refresh token) can still be live, so expired entries count too.
+        data = cache.get(key, include_expired=True)
         if not data:
             continue
         region = data.get("region") or key.split("_")[1]
@@ -447,7 +449,7 @@ def _logout_session(key: str, data: dict, region: str) -> None:
         return  # access token already invalid and nothing can renew it
     # Same digest suffix as the token key: sso-token_<region>_<digest>.
     client_key = key.replace("sso-token_", "sso-client_", 1) + f"_{data.get('flow', 'auth_code')}"
-    client = cache.get(client_key)
+    client = cache.get(client_key, include_expired=True)
     if not client:
         raise RuntimeError("refresh token could not be revoked (no client registration)")
     try:

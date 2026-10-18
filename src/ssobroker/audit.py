@@ -295,6 +295,13 @@ def _push_pending(log_group: str, region: str, credentials: dict | None) -> int:
             continue
         events.append({"timestamp": _entry_timestamp_ms(entry, now_ms), "message": line})
     events.sort(key=lambda ev: ev["timestamp"])
+    too_large = [ev for ev in events if _event_size(ev) > _CLOUDWATCH_MAX_BYTES]
+    if too_large:
+        # One such event would fail every request it is in, forever.
+        _warn(
+            f"{len(too_large)} audit entries are too large for CloudWatch; they stay in the local log"
+        )
+        events = [ev for ev in events if _event_size(ev) <= _CLOUDWATCH_MAX_BYTES]
 
     if credentials:
         session = boto3.Session(
@@ -320,10 +327,15 @@ def _push_pending(log_group: str, region: str, credentials: dict | None) -> int:
         )
         rejected += _rejected_count(resp.get("rejectedLogEventsInfo") or {}, len(batch))
     if rejected:
-        # Too old, expired or too far in the future: retrying can't fix these.
-        _warn(f"{rejected} audit entries were rejected by CloudWatch; they stay in the local log")
+        # Too old/expired, or stamped over 2 hours ahead by a skewed clock.
+        # The cursor moves past them either way; they stay in the local log.
+        _warn(f"CloudWatch rejected {rejected} audit entries; they stay in the local log")
     _cursor_path().write_text(str(len(lines)))
-    return len(events)
+    return len(events) - rejected
+
+
+def _event_size(ev: InputLogEventTypeDef) -> int:
+    return len(ev["message"].encode("utf-8")) + 26
 
 
 def _batches(events: list[InputLogEventTypeDef]) -> list[list[InputLogEventTypeDef]]:
@@ -333,7 +345,7 @@ def _batches(events: list[InputLogEventTypeDef]) -> list[list[InputLogEventTypeD
     batch: list[InputLogEventTypeDef] = []
     size = 0
     for ev in events:
-        ev_size = len(ev["message"].encode("utf-8")) + 26
+        ev_size = _event_size(ev)
         if batch and (
             len(batch) >= _CLOUDWATCH_BATCH
             or size + ev_size > _CLOUDWATCH_MAX_BYTES
@@ -349,10 +361,11 @@ def _batches(events: list[InputLogEventTypeDef]) -> list[list[InputLogEventTypeD
 
 
 def _rejected_count(info: RejectedLogEventsInfoTypeDef, batch_len: int) -> int:
-    """How many events of one request CloudWatch rejected."""
-    too_old = max(info.get("tooOldLogEventEndIndex", -1), info.get("expiredLogEventEndIndex", -1))
+    """How many events of one request CloudWatch rejected. Old/expired end
+    indexes are exclusive, the too-new start index inclusive."""
+    too_old = max(info.get("tooOldLogEventEndIndex", 0), info.get("expiredLogEventEndIndex", 0))
     too_new = info.get("tooNewLogEventStartIndex", batch_len)
-    return (too_old + 1) + (batch_len - too_new)
+    return min(batch_len, too_old + (batch_len - max(too_new, too_old)))
 
 
 def _entry_timestamp_ms(entry: dict, fallback_ms: int) -> int:

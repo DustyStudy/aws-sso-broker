@@ -302,11 +302,12 @@ def keys(prefix: str) -> list[str]:
     return sorted(found)
 
 
-def get(key: str, *, keyring: bool | None = None) -> dict | None:
+def get(key: str, *, keyring: bool | None = None, include_expired: bool = False) -> dict | None:
     """Return the cached value for `key`, or None if missing or expired.
 
     `keyring` picks the OS keychain (True) or the file cache only (False);
-    None means the default for that key (keychain for SSO tokens)."""
+    None means the default for that key (keychain for SSO tokens).
+    `include_expired` returns an expired entry as-is instead of deleting it."""
     if _use_keyring_for(key, keyring):
         kr = _keyring_module()
         if kr is not None:
@@ -321,7 +322,7 @@ def get(key: str, *, keyring: bool | None = None) -> dict | None:
                     data = None
                 if data is not None:
                     expires_at = data.get("expiresAt")
-                    if expires_at is not None and time.time() >= expires_at:
+                    if not include_expired and expires_at is not None and time.time() >= expires_at:
                         _keyring_delete(key)
                         return None
                     return data
@@ -336,7 +337,7 @@ def get(key: str, *, keyring: bool | None = None) -> dict | None:
     except (json.JSONDecodeError, OSError):
         return None
     expires_at = data.get("expiresAt")
-    if expires_at is not None and time.time() >= expires_at:
+    if not include_expired and expires_at is not None and time.time() >= expires_at:
         try:
             p.unlink()
         except OSError:
