@@ -309,3 +309,20 @@ def test_sync_honors_aws_config_file(monkeypatch, tmp_path):
     cfg = _cfg(prod=Account(alias="prod", account_id="111111111111", roles=["ro"]))
     assert aws_config_sync.sync(cfg).path == target
     assert "[profile prod]" in target.read_text()
+
+
+@pytest.mark.parametrize(
+    ("alias", "existing"),
+    [
+        ("prod", '[profile "prod"]\nregion = eu-west-1\n'),
+        ("default", "[default]\nregion = eu-west-1\n"),
+    ],
+)
+def test_equivalent_unmanaged_profile_header_is_a_conflict(monkeypatch, tmp_path, alias, existing):
+    target = tmp_path / "config"
+    target.write_text(existing)
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(target))
+    cfg = _cfg(**{alias: Account(alias=alias, account_id="111111111111", roles=["ro"])})
+    result = aws_config_sync.sync(cfg)
+    assert result.conflicts == [alias]
+    assert target.read_text() == existing

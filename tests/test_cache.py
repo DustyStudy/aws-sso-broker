@@ -136,3 +136,45 @@ def test_explicit_keyring_without_a_keychain_writes_no_file(tmp_path, monkeypatc
     monkeypatch.setattr(cache, "_keyring_module", lambda: None)
     cache.put("role-creds_k", {"secret": "x"}, keyring=True)
     assert not list(cache.cache_dir().glob("role-creds_*.json"))
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows ACLs")
+def test_windows_state_folder_gets_a_private_acl(tmp_path, monkeypatch):
+    import subprocess
+
+    home = tmp_path / "home"
+    (home / "cache").mkdir(parents=True)
+    (home / "audit.log").write_text("from before the ACL")
+    monkeypatch.setenv("SSOBROKER_HOME", str(home))
+    cache.put("mykey", {"value": 1})
+    acl = subprocess.run(
+        ["icacls", str(home), "/T"], capture_output=True, text=True, check=True
+    ).stdout
+    assert "audit.log" in acl
+    assert cache._current_user_sid() not in ("", None)
+    for broad in ("Everyone", "BUILTIN\\Users", "Authenticated Users"):
+        assert broad not in acl
+
+
+@pytest.mark.skipif(sys.platform == "win32", reason="symlinks need admin on Windows")
+def test_put_never_writes_through_a_planted_symlink(tmp_path, monkeypatch):
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path / "home"))
+    victim = tmp_path / "victim.txt"
+    victim.write_text("keep me")
+    (cache.cache_dir() / "mykey.json").symlink_to(victim)
+    cache.put("mykey", {"value": 1})
+    assert victim.read_text() == "keep me"
+    assert cache.get("mykey") == {"value": 1}
+
+
+def test_concurrent_keyring_index_adds_keep_every_entry(tmp_path, monkeypatch):
+    import threading
+
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
+    keys = [f"sso-token_r_{i}" for i in range(20)]
+    threads = [threading.Thread(target=cache._keyring_index_add, args=(k,)) for k in keys]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+    assert cache.keys("sso-token_") == sorted(keys)

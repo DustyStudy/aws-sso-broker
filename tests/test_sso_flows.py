@@ -107,15 +107,38 @@ def test_auth_code_flow_uses_pkce_and_loopback(monkeypatch):
     assert stored["expiresAt"] - stored["issuedAt"] == pytest.approx(8 * 3600, abs=5)
 
 
-def test_auth_code_flow_rejects_wrong_state(monkeypatch):
+def test_auth_code_flow_ignores_wrong_state(monkeypatch):
+    # A forged callback is ignored, not accepted and not allowed to end the login.
     oidc = FakeOidc()
-    monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: oidc)
     opener, _ = _browser(lambda q: {"code": "the-code", "state": "forged"})
     monkeypatch.setattr(sso.webbrowser, "open", opener)
 
-    with pytest.raises(sso.SsoLoginError, match="state"):
-        sso.login(START_URL, REGION)
+    with pytest.raises(sso.SsoLoginError, match="Timed out"):
+        sso._auth_code_flow(oidc, START_URL, REGION, True, timeout=2)
     assert oidc.create_token_calls == []
+
+
+def test_auth_code_flow_survives_a_forged_callback_first(monkeypatch):
+    oidc = FakeOidc()
+
+    def _open(url):
+        q = {k: v[0] for k, v in parse_qs(urlparse(url).query).items()}
+        redirect = urlparse(q["redirect_uri"])
+
+        def _call():
+            for state in ("forged", q["state"]):
+                conn = http.client.HTTPConnection(redirect.hostname, redirect.port, timeout=5)
+                conn.request("GET", f"{redirect.path}?{urlencode({'code': state, 'state': state})}")
+                conn.getresponse().read()
+                conn.close()
+
+        threading.Thread(target=_call, daemon=True).start()
+        return True
+
+    monkeypatch.setattr(sso.webbrowser, "open", _open)
+    sso._auth_code_flow(oidc, START_URL, REGION, True, timeout=10)
+    (call,) = oidc.create_token_calls
+    assert call["code"] != "forged"
 
 
 def test_auth_code_flow_surfaces_idp_error(monkeypatch):

@@ -98,6 +98,20 @@ def _managed_profiles_for(
     return profiles, skipped
 
 
+def _profile_id(section_name: str) -> str:
+    """The profile a section header defines, the way the AWS CLI reads it:
+    [default], [profile default] and [profile "default"] are all one profile."""
+    if section_name == "default":
+        return "default"
+    kind, _, rest = section_name.partition(" ")
+    if kind != "profile":
+        return section_name  # sso-session, services, ...: not a profile
+    rest = rest.strip()
+    if len(rest) >= 2 and rest[0] == rest[-1] == '"':
+        rest = rest[1:-1]
+    return rest
+
+
 class _Section:
     def __init__(self, name: str, lines: list[str]):
         self.name = name
@@ -187,7 +201,7 @@ def sync(
     new_blocks: list[list[str]] = []
     for name, settings in desired.items():
         section_name = f"profile {name}"
-        existing = [s for s in sections if s.name == section_name]
+        existing = [s for s in sections if _profile_id(s.name) == name]
         if any(not s.managed for s in existing):
             # Pre-existing, not ours — never touch it.
             conflicts.append(name)

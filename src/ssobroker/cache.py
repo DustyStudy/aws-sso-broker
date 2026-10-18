@@ -15,11 +15,17 @@ Install the `keyring` extra to enable OS-keychain storage:
 
 from __future__ import annotations
 
+import contextlib
+import functools
 import hashlib
 import json
 import os
+import secrets
 import stat
+import subprocess
+import sys
 import time
+from collections.abc import Iterator
 from pathlib import Path
 
 from .paths import home_dir
@@ -58,7 +64,59 @@ def cache_dir() -> Path:
     d.mkdir(parents=True, exist_ok=True)
     _lock_down(base)
     _lock_down(d)
+    if sys.platform == "win32":
+        _private_acl_once(base)
     return d
+
+
+_ACL_MARKER = ".private-acl"
+
+
+def _system32(exe: str) -> str:
+    return os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", exe)
+
+
+@functools.cache
+def _current_user_sid() -> str:
+    out = subprocess.run(
+        [_system32("whoami.exe"), "/user", "/fo", "csv", "/nh"],
+        capture_output=True,
+        text=True,
+        check=True,
+    ).stdout
+    return out.strip().split(",")[-1].strip('"')
+
+
+def _private_acl_once(base: Path) -> None:
+    """chmod can't restrict readers on Windows, so give the state folder (and
+    everything in it) an ACL that grants only this user and SYSTEM, replacing
+    whatever it inherited. Done once per folder; a marker file records it."""
+    marker = base / _ACL_MARKER
+    if marker.exists():
+        return
+    try:
+        sid = _current_user_sid()
+        # Grant first, then drop inheritance: the other order briefly leaves an
+        # empty ACL that locks out a second ssobroker process starting at the same time.
+        for step in (
+            ["/grant:r", f"*{sid}:(OI)(CI)F", "*S-1-5-18:(OI)(CI)F"],
+            ["/inheritance:r"],
+        ):
+            result = subprocess.run(
+                # No /T: Windows passes the inheritable ACEs down to existing files itself.
+                [_system32("icacls.exe"), str(base), *step, "/Q"],
+                capture_output=True,
+                text=True,
+            )
+            if result.returncode != 0:
+                raise OSError((result.stderr or result.stdout).strip())
+    except (OSError, subprocess.CalledProcessError) as e:
+        print(f"ssobroker: could not restrict access to {base}: {e}", file=sys.stderr)
+        return
+    try:
+        marker.touch()
+    except OSError:
+        pass  # another process is applying it right now; the next run checks again
 
 
 def _lock_down(path: Path) -> None:
@@ -73,20 +131,67 @@ def _lock_down(path: Path) -> None:
 
 
 def _write_locked_down(path: Path, data: str) -> None:
-    """Create/overwrite `path` with owner-only permissions in place, rather
-    than writing with the default (often world-readable) mode and chmod'ing
-    afterward — which leaves a brief window where a brand-new cache file,
-    containing a live token or credentials, is readable by anyone. Still
-    best-effort on Windows, where os.open()'s mode argument doesn't map onto
-    real ACLs (see _lock_down above) — the final _lock_down call here mainly
-    matters for the case the file already existed with looser permissions.
-    """
-    fd = os.open(path, os.O_CREAT | os.O_WRONLY | os.O_TRUNC, 0o600)
+    """Write `path` with owner-only permissions from the moment it exists,
+    rather than writing with the default (often world-readable) mode and
+    chmod'ing afterward. The data goes to a new temp file (O_EXCL, so never
+    through a planted symlink) that then replaces `path`, so a reader never
+    sees half a file. On Windows the folder ACL does the restricting (see
+    _private_acl_once)."""
+    tmp = path.with_name(f".{path.name}.{secrets.token_hex(8)}.tmp")
+    fd = os.open(tmp, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
     try:
         with os.fdopen(fd, "w") as f:
             f.write(data)
-    finally:
-        _lock_down(path)
+        _replace(tmp, path)
+    except BaseException:
+        tmp.unlink(missing_ok=True)
+        raise
+
+
+def _replace(src: Path, dst: Path) -> None:
+    for attempt in range(10):
+        try:
+            os.replace(src, dst)
+            return
+        except PermissionError:
+            # Windows refuses while another process has dst open for a moment.
+            if os.name != "nt" or attempt == 9:
+                raise
+            time.sleep(0.05)
+
+
+@contextlib.contextmanager
+def _index_lock() -> Iterator[None]:
+    """Hold an exclusive lock while reading and rewriting the keyring index,
+    so two processes logging in at once don't drop each other's entries."""
+    with open(cache_dir() / ".keyring_index.lock", "a+b") as f:
+        if sys.platform == "win32":
+            import msvcrt
+
+            # LK_LOCK retries only once a second, so poll the non-blocking lock instead.
+            deadline = time.monotonic() + 10
+            while True:
+                f.seek(0)
+                try:
+                    msvcrt.locking(f.fileno(), msvcrt.LK_NBLCK, 1)
+                    break
+                except OSError:
+                    if time.monotonic() > deadline:
+                        raise
+                    time.sleep(0.02)
+            try:
+                yield
+            finally:
+                f.seek(0)
+                msvcrt.locking(f.fileno(), msvcrt.LK_UNLCK, 1)
+        else:
+            import fcntl
+
+            fcntl.flock(f, fcntl.LOCK_EX)
+            try:
+                yield
+            finally:
+                fcntl.flock(f, fcntl.LOCK_UN)
 
 
 def _path_for(key: str) -> Path:
@@ -112,17 +217,19 @@ def _keyring_index() -> set[str]:
 
 
 def _keyring_index_add(key: str) -> None:
-    idx = _keyring_index()
-    idx.add(key)
-    _write_locked_down(_keyring_index_path(), json.dumps(sorted(idx)))
+    with _index_lock():
+        idx = _keyring_index()
+        idx.add(key)
+        _write_locked_down(_keyring_index_path(), json.dumps(sorted(idx)))
 
 
 def _keyring_index_remove(key: str) -> None:
-    idx = _keyring_index()
-    if key not in idx:
-        return
-    idx.discard(key)
-    _write_locked_down(_keyring_index_path(), json.dumps(sorted(idx)))
+    with _index_lock():
+        idx = _keyring_index()
+        if key not in idx:
+            return
+        idx.discard(key)
+        _write_locked_down(_keyring_index_path(), json.dumps(sorted(idx)))
 
 
 def _use_keyring_for(key: str, keyring: bool | None) -> bool:
