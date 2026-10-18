@@ -13,7 +13,7 @@ Log in once via your org's Identity Center portal, then run commands or open a
 shell against any account/role you're granted, with short-lived, auto-expiring
 credentials and a local audit trail.
 
-**Verified live:** two runs against a real Identity Center organization, with
+**Verified live:** two runs against a real IAM Identity Center instance, with
 all 12 hardening claims proven. The second run caught a regression that would
 have forced users to sign in every hour, fixed before release.
 [Evidence](docs/PROOF.md).
@@ -85,8 +85,8 @@ guardrails do and do not protect against.
   credentials tied to the SSO session that fetched them.
 - **`doctor`**: warns about long-lived access keys and AWS CLI SSO tokens
   left on disk, the files commodity infostealers copy.
-- **Admin-managed policy**: pin the allowed start URLs, cap session length
-  and enforce guardrails. It can only tighten a user's settings.
+- **Machine policy**: a file only root/Administrators can write that pins the allowed start URLs,
+  caps session length and enforces guardrails. It can only tighten settings.
 - **Verifiable releases**: wheel, sdist, hash-locked requirements and a
   CycloneDX SBOM, each with a signed build-provenance attestation.
 
@@ -94,7 +94,7 @@ The full list is in [docs/USAGE.md](docs/USAGE.md#features).
 
 ## Install
 
-### Verified release (recommended for organizations)
+### Verified release (recommended)
 
 Download the wheel and `runtime-requirements.txt` from the
 [latest release](https://github.com/DustyStudy/aws-sso-broker/releases/latest), then:
@@ -105,7 +105,7 @@ python3 -m pip install --require-hashes -r runtime-requirements.txt
 python3 -m pip install --no-deps aws_sso_broker-*.whl
 ```
 
-See [docs/ENTERPRISE.md](docs/ENTERPRISE.md) for fleet rollout.
+See [docs/HARDENING.md](docs/HARDENING.md) for the optional extra hardening.
 
 ### pipx (recommended for CLI-only use)
 
@@ -152,8 +152,8 @@ ssobroker shell -a prod -r read-only
 
 [docs/USAGE.md](docs/USAGE.md) covers the rest: `creds-process`,
 `sync-aws-config`, `export-env`, `check-policy`, `whoami`, `audit-log` and
-`--json` output, plus `orgs.yaml`, `guardrails.yaml` and the managed policy.
-[docs/ENTERPRISE.md](docs/ENTERPRISE.md) covers fleet rollout.
+`--json` output, plus `orgs.yaml`, `guardrails.yaml` and the machine policy.
+[docs/HARDENING.md](docs/HARDENING.md) covers the optional extra hardening.
 
 ## Security model
 
@@ -185,9 +185,10 @@ sign-in and profiles well. `ssobroker` adds a few things around that:
 - **Guardrails before the call leaves the machine**: protected accounts and
   deny/confirm patterns, which catch the wrong-terminal-tab mistake.
 - **An audit trail tied to CloudTrail**: every credential use is logged with
-  its temporary `AccessKeyId`, redacted, and optionally forwarded to your SIEM.
-- **Admin-managed policy**: a security team can pin start URLs, turn off
-  device-code sign-in and enforce guardrails on every endpoint.
+  its temporary `AccessKeyId`, redacted, and optionally forwarded off the machine.
+- **Machine policy**: a file only root/Administrators can write can pin start URLs, turn off
+  device-code sign-in and enforce guardrails, out of reach of a process
+  running as you.
 - **Safe `~/.aws/config` generation**: `sync-aws-config` writes one
   `credential_process` profile per account/role from a single registry
   without touching anything it didn't create.
@@ -199,7 +200,7 @@ None of these replace IAM, SCPs or CloudTrail; see the security model above.
 Run for real against a real IAM Identity Center instance, twice, and
 verified against AWS's own responses. The first run covered credentials,
 guardrails, audit logging, `sync-aws-config` and logout, and found nothing.
-The second covered the corporate hardening: PKCE sign-in, server-side logout
+The second covered the sign-in and audit hardening: PKCE sign-in, server-side logout
 (the old token is rejected by AWS afterwards), the managed policy, redaction,
 CloudWatch forwarding, and finding the audit log's `access_key_id` in
 CloudTrail. It found that users would have had to sign in every hour, which

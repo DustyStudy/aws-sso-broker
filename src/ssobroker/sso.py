@@ -9,8 +9,8 @@ Two login flows, both standard AWS SSO OIDC grants:
   somewhere else.
 - Device authorization (`login_flow: device_code` or `login --use-device-code`)
   for headless machines with no local browser. The approval URL can be opened
-  on any device, which is exactly what device-code phishing abuses, so an
-  admin can turn it off with the managed policy.
+  on any device, which is exactly what device-code phishing abuses, so the
+  managed policy can turn it off.
 
 Either way the result is an SSO access token (cached, short-lived) that is
 exchanged for short-lived role credentials — never a long-lived key.

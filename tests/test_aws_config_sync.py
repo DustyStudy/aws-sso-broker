@@ -106,17 +106,17 @@ def _three_accounts() -> OrgConfig:
 def test_prefix_keeps_one_profile_per_account():
     # Regression: with --prefix, every account collapsed into a profile named
     # exactly <prefix>, so only the last account survived.
-    written, _, _, path, _ = aws_config_sync.sync(_three_accounts(), prefix="corp")
+    written, _, _, path, _ = aws_config_sync.sync(_three_accounts(), prefix="sso")
 
-    assert sorted(written) == ["corp-a", "corp-b", "corp-c"]
+    assert sorted(written) == ["sso-a", "sso-b", "sso-c"]
     parser = configparser.ConfigParser()
     parser.read(path)
-    assert parser.get("profile corp-b", "credential_process").endswith("--account b --role ro")
+    assert parser.get("profile sso-b", "credential_process").endswith("--account b --role ro")
 
 
 def test_prefix_with_all_roles_keeps_one_profile_per_account_and_role():
-    written, _, _, _, _ = aws_config_sync.sync(_three_accounts(), prefix="corp", all_roles=True)
-    assert sorted(written) == ["corp-a-ro", "corp-b-ro", "corp-c-admin", "corp-c-ro"]
+    written, _, _, _, _ = aws_config_sync.sync(_three_accounts(), prefix="sso", all_roles=True)
+    assert sorted(written) == ["sso-a-ro", "sso-b-ro", "sso-c-admin", "sso-c-ro"]
 
 
 def test_colliding_profile_names_raise_instead_of_dropping_one():

@@ -389,7 +389,7 @@ def list_remote(as_json: bool):
 @click.option(
     "--reason",
     default=None,
-    help="Free-text justification (e.g. ticket #) recorded in the local audit log. "
+    help="Free-text note (e.g. why you ran it) recorded in the local audit log. "
     "NOT an AWS-side STS session tag — SSO's credential API doesn't support those.",
 )
 @click.option(

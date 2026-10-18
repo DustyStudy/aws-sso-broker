@@ -25,7 +25,7 @@ What this tool has custody of, at some point, and what protecting it means:
 | Short-lived role credentials (`AccessKeyId`/`SecretAccessKey`/`SessionToken`) | Same cache, keyed per account+role | Same as above, plus never exported outside the one child process/shell that requested them — except via `export-env`/`creds-process`, whose whole purpose is printing them to stdout for the caller's own use (see scenario 4) |
 | `orgs.yaml` (account registry) | `~/.ssobroker/orgs.yaml` (or `SSOBROKER_CONFIG`) | Contains account IDs and role names only — no secrets — but is still the map an attacker would want to see, and its contents drive which guardrails apply |
 | `guardrails.yaml` | `~/.ssobroker/guardrails.yaml` (or `SSOBROKER_GUARDRAILS`) | Governs which commands get blocked/confirmed — its integrity matters more than its confidentiality |
-| `policy.yaml` (admin-managed, optional) | `/etc/ssobroker/` or `%ProgramData%\ssobroker\` | Written only by root/Administrators; can only tighten user settings, never loosen them or supply a start URL |
+| `policy.yaml` (machine-wide, optional) | `/etc/ssobroker/` or `%ProgramData%\ssobroker\` | Written only by root/Administrators; can only tighten user settings, never loosen them or supply a start URL |
 | Local audit log | `~/.ssobroker/audit.log` (or `SSOBROKER_HOME`) | A record of what was run against which account, for the operator's own review; append-only in practice, not append-only *enforced* (see below) |
 | `~/.aws/config` profiles written by `sync-aws-config` | Standard AWS config location | Must not silently absorb or overwrite a profile the tool didn't create |
 
@@ -120,8 +120,8 @@ attacker-controlled Identity Center instance.
 in-memory trust carried across invocations), and `yaml.safe_load` is used
 throughout — no arbitrary object construction or code execution via a
 crafted YAML file, unlike `yaml.load` with the default loader.
-`sso_start_url` must be `https://`. When an admin deploys the managed
-policy (`policy.yaml`, writable only by root/Administrators),
+`sso_start_url` must be `https://`. When the managed
+policy is installed (`policy.yaml`, writable only by root/Administrators),
 `allowed_sso_start_urls` pins which Identity Center instances may be used,
 its guardrails are added on top of the user's file and can't be removed
 from it, and `ignore_env_overrides` stops `SSOBROKER_GUARDRAILS` /
@@ -137,10 +137,10 @@ endpoint and phish the operator's next sign-in. This
 requires local write access to the operator's home directory already,
 which is a fairly high bar (roughly equivalent to "attacker already has
 code execution as this user"), but it's worth naming explicitly rather
-than leaving implicit. Without a managed policy this still holds. Anyone deploying `ssobroker`
-fleet-wide should deploy `policy.yaml` with `allowed_sso_start_urls` and
-`ignore_env_overrides` (see [ENTERPRISE.md](ENTERPRISE.md)). On Windows the
-policy's protection depends on the folder ACL the admin sets.
+than leaving implicit. Without a managed policy this still holds. To close it, install
+`policy.yaml` with `allowed_sso_start_urls` and
+`ignore_env_overrides` (see [HARDENING.md](HARDENING.md)). On Windows the
+policy's protection depends on the folder ACL set when it is installed.
 
 ### 4. Credentials leak out of the intended child process
 
@@ -232,8 +232,8 @@ provisions and secures the destination log group (encryption at rest, log
 group resource policy, who has `logs:GetLogEvents` on it) — outside this
 tool's control by design. `ssobroker` does not create the log group and does
 not set access policy on it. Worth calling out explicitly: the
-`--reason` field is free text the operator types, not validated against a
-ticketing system, so treat it as a note-to-self / good-faith annotation,
+`--reason` field is free text the operator types and nothing checks it,
+so treat it as a note-to-self / good-faith annotation,
 not a tamper-evident justification.
 
 ### 7. The local audit log itself is edited or deleted after the fact
@@ -267,7 +267,7 @@ delivered only to the listener on the machine that started the sign-in, the
 `state` value is checked, and the code is useless without the PKCE verifier
 that never leaves the process. The device-code flow is still available for
 headless machines, prints a warning to approve only requests you started,
-and can be disabled fleet-wide with `allow_device_code: false`.
+and can be disabled with `allow_device_code: false` in the managed policy.
 
 **Residual risk:** the managed policy doesn't stop an attacker from running
 their own device-code sign-in against your Identity Center with some other
@@ -290,7 +290,7 @@ has a long-lived access key or an `aws sso login` token from before.
 and any AWS CLI SSO token that is unexpired or refresh-capable, plus a NOTE for
 cached temporary credentials. It reads only profile names, counts and expiry
 times and never prints a key or token. `ssobroker doctor --strict` exits 1 on
-a WARN, so a fleet check or login script can enforce it.
+a WARN, so a scheduled check or login script can enforce it.
 
 **Residual risk:** `doctor` reports; it does not delete. The operator still has
 to deactivate the key in IAM and run `aws sso logout`. It does not see other
@@ -332,9 +332,9 @@ Naming these directly, rather than leaving them as an implied gap:
   separate, trusted browser context).
 - **Auditability/non-repudiation of the local audit log** — see scenario 7.
 
-## Recommended compensating controls (for whoever deploys this)
+## Recommended compensating controls
 
-Start with [ENTERPRISE.md](ENTERPRISE.md): a managed `policy.yaml` pinning
+Start with [HARDENING.md](HARDENING.md): a managed `policy.yaml` pinning
 `allowed_sso_start_urls`, turning off device-code sign-in and environment
 overrides, and forwarding the audit log.
 
@@ -343,14 +343,14 @@ enforcement layer this tool assumes exists around it:
 
 - IAM permission boundaries and/or SCPs on every role `ssobroker` can assume,
   scoped to least privilege for that role's actual job.
-- CloudTrail enabled org-wide, as the real (tamper-evident, AWS-side)
+- An organization CloudTrail trail covering every account, as the real (tamper-evident, AWS-side)
   record of API activity — not the local audit log.
 - MFA required at the Identity Center level for the sign-in
   flow itself.
 - If using `--push-cloudwatch`: encryption at rest on the destination log
   group, a resource policy restricting who can read it, and a retention
-  policy appropriate for your compliance requirements.
-- Session policies / `max_session_hours` tuned to your organization's risk
+  period that fits how long you want the history.
+- Session policies / `max_session_hours` tuned to your own risk
   tolerance for "how long should a stolen laptop's cached token remain
   useful," independent of AWS's own token expiry.
 

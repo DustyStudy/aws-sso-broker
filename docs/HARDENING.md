@@ -1,13 +1,14 @@
-# Deploying ssobroker in an organization
+# Locking ssobroker down
 
-This guide is for the team that rolls `ssobroker` out to many machines. It
-covers the admin-managed policy, audit forwarding, network settings, and how
-to verify the package you install. Individual users don't need any of it.
+Optional extra hardening for the machines you run `ssobroker` on: a
+machine-wide policy file, audit forwarding, network settings, and how to
+verify the package you install. Day-to-day use doesn't need any of it.
 
 `ssobroker` is still a client-side tool. Enforcement belongs in IAM, SCPs,
 permission boundaries and Identity Center itself; see
 [THREAT_MODEL.md](THREAT_MODEL.md). What this guide adds is a way to make
-every endpoint behave the same and to get its activity into your SIEM.
+every machine you use behave the same and to keep a copy of its activity off
+the machine.
 
 ## 1. Install a verified build
 
@@ -21,7 +22,7 @@ Each GitHub release has these files attached:
 | `aws-sso-broker.cdx.json` | CycloneDX SBOM of those dependencies |
 
 All four carry a signed build-provenance attestation. Check the wheel before
-you mirror it:
+you install it:
 
 ```bash
 gh attestation verify aws_sso_broker-X.Y.Z-py3-none-any.whl --repo DustyStudy/aws-sso-broker
@@ -39,9 +40,11 @@ If the release is also on PyPI (`pipx install aws-sso-broker`), it was
 uploaded with trusted publishing from the same workflow, and PyPI shows that
 publisher attestation on the file page.
 
-## 2. The managed policy
+## 2. The machine policy
 
-Put a `policy.yaml` where users can't write:
+`ssobroker doctor` and error messages call this the managed policy.
+
+Put a `policy.yaml` where your everyday account can't write:
 
 | OS | Path | Protection |
 |---|---|---|
@@ -58,7 +61,7 @@ icacls $dir /inheritance:r /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F
 ```
 
 [`config/policy.example.yaml`](../config/policy.example.yaml) lists every
-setting. The rules that make it safe to deploy:
+setting. The rules that make it safe to use:
 
 - **It only tightens.** It can pin the allowed start URLs, lower
   `max_session_hours`, add guardrails, require a stricter role-credential
@@ -69,10 +72,10 @@ setting. The rules that make it safe to deploy:
 - **No environment variable can point at a different policy file.**
 - `ssobroker doctor` shows whether a policy was applied.
 
-The settings most organizations want:
+The settings worth turning on:
 
 ```yaml
-allowed_sso_start_urls: [https://corp.awsapps.com/start]
+allowed_sso_start_urls: [https://my-sso-portal.awsapps.com/start]
 ignore_env_overrides: true      # SSOBROKER_GUARDRAILS=/dev/null no longer disables guardrails
 allow_device_code: false        # removes the device-code phishing path
 strict_protected_accounts: true # protected accounts blocked in creds-process/export-env too
@@ -125,7 +128,7 @@ Forwarding targets (`audit_forward`):
 
 | Target | Where | Notes |
 |---|---|---|
-| `syslog` | Local syslog, facility `auth` | Linux/macOS. Ship with your existing agent. |
+| `syslog` | Local syslog, facility `auth` | Linux/macOS. Forward it with any log shipper you already run. |
 | `eventlog` | Windows Application log, source `ssobroker` | Install with the `windows` extra. Register the event source once as admin: `New-EventLog -LogName Application -Source ssobroker`. |
 | `cloudwatch` | `cloudwatch_log_group` | Pushes unsent entries after each write. A cursor file avoids duplicates; two processes at the same moment can still both send one entry. |
 
@@ -138,7 +141,7 @@ dedicated role that can only write to the group:
   "Statement": [{
     "Effect": "Allow",
     "Action": ["logs:CreateLogStream", "logs:PutLogEvents"],
-    "Resource": "arn:aws:logs:*:444444444444:log-group:/corp/ssobroker/audit:*"
+    "Resource": "arn:aws:logs:*:444444444444:log-group:/ssobroker/audit:*"
   }]
 }
 ```
@@ -156,8 +159,8 @@ For TLS-inspecting proxies, proxies and FIPS endpoints, set these in
 `orgs.yaml` (or the matching environment variables, which win):
 
 ```yaml
-ca_bundle: /etc/pki/corp-root-ca.pem   # AWS_CA_BUNDLE
-https_proxy: http://proxy.corp:8080    # HTTPS_PROXY
+ca_bundle: /etc/pki/proxy-root-ca.pem   # AWS_CA_BUNDLE
+https_proxy: http://proxy.example:8080 # HTTPS_PROXY
 use_fips_endpoint: true                # AWS_USE_FIPS_ENDPOINT
 ```
 
@@ -171,11 +174,11 @@ for that region.
 
 ## 6. Checklist
 
-- [ ] Wheel verified with `gh attestation verify` and mirrored internally
+- [ ] Wheel verified with `gh attestation verify`
 - [ ] `policy.yaml` deployed, root/Administrators-only write, `ssobroker doctor` shows it
-- [ ] `ssobroker doctor --strict` passes on every machine: no long-lived keys in `~/.aws/credentials`, no AWS CLI SSO tokens left in `~/.aws/sso/cache`
+- [ ] `ssobroker doctor --strict` passes on each machine: no long-lived keys in `~/.aws/credentials`, no AWS CLI SSO tokens left in `~/.aws/sso/cache`
 - [ ] `allowed_sso_start_urls` set
 - [ ] `allow_device_code: false` (except on headless machines)
 - [ ] MFA required in Identity Center
 - [ ] Audit forwarding on, and the destination encrypted and access-controlled
-- [ ] SCPs / permission boundaries in place for every role users can reach
+- [ ] SCPs / permission boundaries in place for every role you can reach

@@ -1,8 +1,8 @@
-"""Corporate network settings: CA bundle, HTTPS proxy, FIPS endpoints.
+"""Network settings: CA bundle, HTTPS proxy, FIPS endpoints.
 
 boto3 and the AWS CLI already read AWS_CA_BUNDLE, HTTPS_PROXY and
-AWS_USE_FIPS_ENDPOINT from the environment. orgs.yaml can set them so every
-machine gets the same values without editing shell profiles. A value already
+AWS_USE_FIPS_ENDPOINT from the environment. orgs.yaml can set them so they
+apply without editing shell profiles. A value already
 set in the environment wins. Because they are set in this process's
 environment, commands started by `exec`/`shell` inherit them too.
 """
