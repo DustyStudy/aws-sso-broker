@@ -136,7 +136,7 @@ def record(
 ) -> dict:
     """Append one entry to the local audit log, then forward it if configured.
 
-    `reason` is a free-text justification (e.g. a ticket number) the caller
+    `reason` is a free-text note (e.g. why the command was run) the caller
     can pass with `--reason`. It's NOT an STS session tag: the AWS SSO
     GetRoleCredentials API this tool uses has no session-tagging parameter.
 
@@ -220,7 +220,7 @@ def _send_eventlog(entry: dict) -> None:
     if sys.platform != "win32":
         raise RuntimeError("the Windows Event Log is only available on Windows")
     # Needs pywin32 (the `windows` extra). Registering the "ssobroker" event
-    # source needs admin once; see docs/ENTERPRISE.md.
+    # source needs admin once; see docs/HARDENING.md.
     _emit(logging.handlers.NTEventLogHandler("ssobroker"), entry)
 
 

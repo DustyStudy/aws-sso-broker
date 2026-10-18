@@ -4,7 +4,7 @@ orgs.yaml is intentionally simple — it just maps human-friendly aliases to
 AWS account IDs and the roles available on each, plus the Identity Center
 start URL/region to log in against. It never contains secrets.
 
-If an admin-managed policy is present (see policy.py), it is applied here:
+If a machine policy is present (see policy.py), it is applied here:
 it can pin the allowed start URLs and tighten session and cache settings,
 never loosen them.
 """

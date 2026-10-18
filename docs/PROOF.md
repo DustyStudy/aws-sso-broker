@@ -4,14 +4,14 @@ Two live runs against a real AWS Organization's real IAM Identity Center
 instance. Account IDs, the SSO user and access keys are masked in the text
 and in the evidence files under [`proof/`](proof/).
 
-- [Run 2 (2026-09-30)](#run-2-2026-09-30-corporate-hardening): the corporate
-  hardening from PR #9: PKCE sign-in, server-side logout, managed policy,
+- [Run 2 (2026-09-30)](#run-2-2026-09-30-sign-in-and-audit-hardening): the sign-in
+  and audit hardening from PR #9: PKCE sign-in, server-side logout, managed policy,
   audit redaction and forwarding, CloudTrail join. **Found one real problem**
   (hourly re-login) and fixed it in the same PR as this proof.
 - [Run 1 (2026-09-23)](#run-1-2026-09-23-core-behavior): core behavior:
   credentials, guardrails, audit log, `sync-aws-config`, logout. Found nothing.
 
-## Run 2 (2026-09-30): corporate hardening
+## Run 2 (2026-09-30): sign-in and audit hardening
 
 Run from `main` at `b0db996` (PR #9) plus the refresh-token fix on this
 branch, on Windows 11 with Python 3.12. `SSOBROKER_HOME` pointed at a

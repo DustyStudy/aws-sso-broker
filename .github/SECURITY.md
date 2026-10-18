@@ -18,7 +18,7 @@ asking for a private channel and it'll be picked up from there.
 scrutiny for security review:
 
 - `src/ssobroker/sso.py` — the sign-in flows (authorization code + PKCE, device code), server-side logout, and token handling
-- `src/ssobroker/policy.py` — the admin-managed policy and its trust checks
+- `src/ssobroker/policy.py` — the machine-wide policy and its trust checks
 - `src/ssobroker/cache.py` — where tokens and role credentials are persisted
   (OS keychain when available, 0600 local files otherwise)
 - `src/ssobroker/exec_cmd.py` — how credentials are exported into child

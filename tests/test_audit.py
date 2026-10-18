@@ -16,9 +16,9 @@ def test_record_and_tail(tmp_path, monkeypatch):
 
 def test_record_with_reason(tmp_path, monkeypatch):
     monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
-    audit.record(action="shell", account_id="999", role="read-only", reason="JIRA-42")
+    audit.record(action="shell", account_id="999", role="read-only", reason="rotate-keys")
     entries = audit.tail(5)
-    assert entries[0]["reason"] == "JIRA-42"
+    assert entries[0]["reason"] == "rotate-keys"
 
 
 def test_tail_returns_empty_when_no_log(tmp_path, monkeypatch):

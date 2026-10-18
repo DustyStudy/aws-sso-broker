@@ -14,7 +14,7 @@ protected_account_ids:
 
 # Also refuse protected accounts in `export-env` and `creds-process`. With this
 # on, `aws --profile <protected>` fails instead of quietly getting credentials.
-# An admin-managed policy can force this on; this file can't turn it off then.
+# The machine policy can force this on; this file can't turn it off then.
 # strict_protected_accounts: true
 
 # Glob patterns (fnmatch-style) matched against the full joined command string.

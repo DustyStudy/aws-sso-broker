@@ -1,7 +1,6 @@
-"""Admin-managed policy (optional).
+"""Machine-wide policy (optional).
 
-A machine-wide `policy.yaml` that an administrator pushes to endpoints (MDM,
-Intune, Jamf, config management). It lives outside the user's home directory,
+A `policy.yaml` installed as root/Administrator. It lives outside the user's home directory,
 so a user or a process running as the user can't edit it:
 
 - Linux/macOS: /etc/ssobroker/policy.yaml
@@ -16,7 +15,7 @@ planted by an attacker can at worst lock the user out, not redirect them.
 The one setting that sends data somewhere is `audit_forward` with CloudWatch.
 On POSIX the file (and its directory) must be owned by root and not writable
 by group/other, or it is rejected. On Windows, deploy the folder with an ACL
-that only Administrators/SYSTEM can write (see docs/ENTERPRISE.md).
+that only Administrators/SYSTEM can write (see docs/HARDENING.md).
 
 No environment variable can point ssobroker at a different policy file —
 that would defeat the point of it.
