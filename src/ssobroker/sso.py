@@ -415,19 +415,55 @@ def logout() -> tuple[int, list[str]]:
     """
     errors: list[str] = []
     for key in cache.keys("sso-token_"):
-        data = cache.get(key)
+        # Past the local session cap the Identity Center session (and its
+        # refresh token) can still be live, so expired entries count too.
+        data = cache.get(key, include_expired=True)
         if not data:
             continue
         region = data.get("region") or key.split("_")[1]
         try:
-            boto3.client("sso", region_name=region).logout(accessToken=data["accessToken"])
+            _logout_session(key, data, region)
         except ClientError as e:
-            code = e.response.get("Error", {}).get("Code")
-            if code not in _TOKEN_INVALID_CODES:
-                errors.append(f"{region}: {code}")
+            errors.append(f"{region}: {e.response.get('Error', {}).get('Code')}")
         except Exception as e:  # noqa: BLE001 — offline etc.; still clear locally
             errors.append(f"{region}: {e}")
     return cache.clear(), errors
+
+
+# CreateToken codes meaning the refresh token (or its client) is already dead.
+_REFRESH_DEAD_CODES = {"InvalidGrantException", "ExpiredTokenException", "InvalidClientException"}
+
+
+def _logout_session(key: str, data: dict, region: str) -> None:
+    """Call SSO Logout for one cached token. An expired access token is
+    refreshed first, so a still-valid refresh token is ended at AWS too."""
+    portal = boto3.client("sso", region_name=region)
+    try:
+        portal.logout(accessToken=data["accessToken"])
+        return
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") not in _TOKEN_INVALID_CODES:
+            raise
+    refresh_token = data.get("refreshToken")
+    if not refresh_token:
+        return  # access token already invalid and nothing can renew it
+    # Same digest suffix as the token key: sso-token_<region>_<digest>.
+    client_key = key.replace("sso-token_", "sso-client_", 1) + f"_{data.get('flow', 'auth_code')}"
+    client = cache.get(client_key, include_expired=True)
+    if not client:
+        raise RuntimeError("refresh token could not be revoked (no client registration)")
+    try:
+        token = boto3.client("sso-oidc", region_name=region).create_token(
+            clientId=client["clientId"],
+            clientSecret=client["clientSecret"],
+            grantType="refresh_token",
+            refreshToken=refresh_token,
+        )
+    except ClientError as e:
+        if e.response.get("Error", {}).get("Code") in _REFRESH_DEAD_CODES:
+            return
+        raise
+    portal.logout(accessToken=token["accessToken"])
 
 
 def _invalidate_if_token_rejected(sso_token: SsoToken, e: ClientError) -> None:

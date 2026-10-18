@@ -302,11 +302,12 @@ def keys(prefix: str) -> list[str]:
     return sorted(found)
 
 
-def get(key: str, *, keyring: bool | None = None) -> dict | None:
+def get(key: str, *, keyring: bool | None = None, include_expired: bool = False) -> dict | None:
     """Return the cached value for `key`, or None if missing or expired.
 
     `keyring` picks the OS keychain (True) or the file cache only (False);
-    None means the default for that key (keychain for SSO tokens)."""
+    None means the default for that key (keychain for SSO tokens).
+    `include_expired` returns an expired entry as-is instead of deleting it."""
     if _use_keyring_for(key, keyring):
         kr = _keyring_module()
         if kr is not None:
@@ -321,7 +322,7 @@ def get(key: str, *, keyring: bool | None = None) -> dict | None:
                     data = None
                 if data is not None:
                     expires_at = data.get("expiresAt")
-                    if expires_at is not None and time.time() >= expires_at:
+                    if not include_expired and expires_at is not None and time.time() >= expires_at:
                         _keyring_delete(key)
                         return None
                     return data
@@ -336,7 +337,7 @@ def get(key: str, *, keyring: bool | None = None) -> dict | None:
     except (json.JSONDecodeError, OSError):
         return None
     expires_at = data.get("expiresAt")
-    if expires_at is not None and time.time() >= expires_at:
+    if not include_expired and expires_at is not None and time.time() >= expires_at:
         try:
             p.unlink()
         except OSError:
@@ -368,10 +369,11 @@ def put(key: str, value: dict, *, keyring: bool | None = None) -> None:
     _write_locked_down(p, json.dumps(value))
 
 
-def _keyring_delete(key: str) -> None:
+def _keyring_delete(key: str) -> bool:
+    """Delete one keychain entry. True if it is gone."""
     kr = _keyring_module()
     if kr is None:
-        return  # keep the index entry so a later clear can still remove it
+        return False  # keep the index entry so a later clear can still remove it
     try:
         kr.delete_password(KEYRING_SERVICE, key)
     except Exception:
@@ -380,8 +382,14 @@ def _keyring_delete(key: str) -> None:
         except Exception:
             still_there = True
         if still_there:
-            return  # keep it indexed so a later logout finds it again
+            return False  # keep it indexed so a later logout finds it again
     _keyring_index_remove(key)
+    return True
+
+
+def keyring_leftovers() -> int:
+    """Keychain entries a clear could not remove (still in the index)."""
+    return len(_keyring_index())
 
 
 def clear(key: str | None = None) -> int:
@@ -389,8 +397,7 @@ def clear(key: str | None = None) -> int:
     removed = 0
 
     if key:
-        if key in _keyring_index():
-            _keyring_delete(key)
+        if key in _keyring_index() and _keyring_delete(key):
             removed += 1
         p = _path_for(key)
         if p.exists():
@@ -408,7 +415,6 @@ def clear(key: str | None = None) -> int:
 
     # ...and every keychain entry we've ever recorded in the index.
     for indexed_key in list(_keyring_index()):
-        _keyring_delete(indexed_key)
-        removed += 1
+        removed += _keyring_delete(indexed_key)
 
     return removed

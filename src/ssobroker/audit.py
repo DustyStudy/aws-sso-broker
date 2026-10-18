@@ -14,6 +14,7 @@ stop the command.
 from __future__ import annotations
 
 import calendar
+import contextlib
 import fnmatch
 import getpass
 import json
@@ -23,7 +24,7 @@ import os
 import socket
 import sys
 import time
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import TYPE_CHECKING
@@ -31,7 +32,7 @@ from typing import TYPE_CHECKING
 from .paths import home_dir
 
 if TYPE_CHECKING:
-    from mypy_boto3_logs.type_defs import InputLogEventTypeDef
+    from mypy_boto3_logs.type_defs import InputLogEventTypeDef, RejectedLogEventsInfoTypeDef
 
 _TS_FORMAT = "%Y-%m-%dT%H:%M:%SZ"
 REDACTED = "***REDACTED***"
@@ -55,6 +56,13 @@ _SYSLOG_FACILITY = logging.handlers.SysLogHandler.LOG_AUTH
 
 # CloudWatch PutLogEvents takes at most 10,000 events / ~1 MB per call.
 _CLOUDWATCH_BATCH = 1000
+# PutLogEvents limits: request size (each event counts 26 bytes extra) and
+# the time span one request may cover.
+_CLOUDWATCH_MAX_BYTES = 1_048_576
+_CLOUDWATCH_MAX_SPAN_MS = 24 * 3600 * 1000 - 1
+# Set while pushing to CloudWatch, and inherited by any credential_process the
+# push starts, so an entry recorded on the way doesn't start another push.
+_FORWARDING_ENV = "SSOBROKER_AUDIT_FORWARDING"
 
 CredentialsProvider = Callable[[], dict]
 
@@ -175,18 +183,35 @@ def _forward(entry: dict) -> None:
             elif target == "eventlog":
                 _send_eventlog(entry)
             elif target == "cloudwatch":
+                # Already inside a push: the entry is in the local log and the
+                # next push sends it.
+                if os.environ.get(_FORWARDING_ENV):
+                    continue
                 if _settings.cloudwatch_log_group and _settings.cloudwatch_region:
-                    push_to_cloudwatch(
-                        _settings.cloudwatch_log_group,
-                        _settings.cloudwatch_region,
-                        credentials=(
-                            _settings.cloudwatch_credentials()
-                            if _settings.cloudwatch_credentials
-                            else None
-                        ),
-                    )
+                    with _forwarding():
+                        push_to_cloudwatch(
+                            _settings.cloudwatch_log_group,
+                            _settings.cloudwatch_region,
+                            credentials=(
+                                _settings.cloudwatch_credentials()
+                                if _settings.cloudwatch_credentials
+                                else None
+                            ),
+                        )
         except Exception as e:  # noqa: BLE001 — forwarding must never break the command
             _warn(f"{target} failed: {e}")
+
+
+@contextlib.contextmanager
+def _forwarding() -> Iterator[None]:
+    if os.environ.get(_FORWARDING_ENV):
+        yield
+        return
+    os.environ[_FORWARDING_ENV] = "1"
+    try:
+        yield
+    finally:
+        os.environ.pop(_FORWARDING_ENV, None)
 
 
 def _syslog_address() -> str | tuple[str, int]:
@@ -247,6 +272,11 @@ def push_to_cloudwatch(log_group: str, region: str, *, credentials: dict | None 
     already exist; this only creates the log stream.
     Returns the number of entries pushed.
     """
+    with _forwarding():
+        return _push_pending(log_group, region, credentials)
+
+
+def _push_pending(log_group: str, region: str, credentials: dict | None) -> int:
     import boto3
 
     path = log_path()
@@ -265,6 +295,13 @@ def push_to_cloudwatch(log_group: str, region: str, *, credentials: dict | None 
             continue
         events.append({"timestamp": _entry_timestamp_ms(entry, now_ms), "message": line})
     events.sort(key=lambda ev: ev["timestamp"])
+    too_large = [ev for ev in events if _event_size(ev) > _CLOUDWATCH_MAX_BYTES]
+    if too_large:
+        # One such event would fail every request it is in, forever.
+        _warn(
+            f"{len(too_large)} audit entries are too large for CloudWatch; they stay in the local log"
+        )
+        events = [ev for ev in events if _event_size(ev) <= _CLOUDWATCH_MAX_BYTES]
 
     if credentials:
         session = boto3.Session(
@@ -283,14 +320,52 @@ def push_to_cloudwatch(log_group: str, region: str, *, credentials: dict | None 
     except client.exceptions.ResourceAlreadyExistsException:
         pass
 
-    for i in range(0, len(events), _CLOUDWATCH_BATCH):
-        client.put_log_events(
-            logGroupName=log_group,
-            logStreamName=stream_name,
-            logEvents=events[i : i + _CLOUDWATCH_BATCH],
+    rejected = 0
+    for batch in _batches(events):
+        resp = client.put_log_events(
+            logGroupName=log_group, logStreamName=stream_name, logEvents=batch
         )
+        rejected += _rejected_count(resp.get("rejectedLogEventsInfo") or {}, len(batch))
+    if rejected:
+        # Too old/expired, or stamped over 2 hours ahead by a skewed clock.
+        # The cursor moves past them either way; they stay in the local log.
+        _warn(f"CloudWatch rejected {rejected} audit entries; they stay in the local log")
     _cursor_path().write_text(str(len(lines)))
-    return len(events)
+    return len(events) - rejected
+
+
+def _event_size(ev: InputLogEventTypeDef) -> int:
+    return len(ev["message"].encode("utf-8")) + 26
+
+
+def _batches(events: list[InputLogEventTypeDef]) -> list[list[InputLogEventTypeDef]]:
+    """Split time-sorted events into PutLogEvents requests within the count,
+    size and 24-hour span limits."""
+    batches: list[list[InputLogEventTypeDef]] = []
+    batch: list[InputLogEventTypeDef] = []
+    size = 0
+    for ev in events:
+        ev_size = _event_size(ev)
+        if batch and (
+            len(batch) >= _CLOUDWATCH_BATCH
+            or size + ev_size > _CLOUDWATCH_MAX_BYTES
+            or ev["timestamp"] - batch[0]["timestamp"] > _CLOUDWATCH_MAX_SPAN_MS
+        ):
+            batches.append(batch)
+            batch, size = [], 0
+        batch.append(ev)
+        size += ev_size
+    if batch:
+        batches.append(batch)
+    return batches
+
+
+def _rejected_count(info: RejectedLogEventsInfoTypeDef, batch_len: int) -> int:
+    """How many events of one request CloudWatch rejected. Old/expired end
+    indexes are exclusive, the too-new start index inclusive."""
+    too_old = max(info.get("tooOldLogEventEndIndex", 0), info.get("expiredLogEventEndIndex", 0))
+    too_new = info.get("tooNewLogEventStartIndex", batch_len)
+    return min(batch_len, too_old + (batch_len - max(too_new, too_old)))
 
 
 def _entry_timestamp_ms(entry: dict, fallback_ms: int) -> int:

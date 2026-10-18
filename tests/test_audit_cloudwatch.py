@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import calendar
 import json
+import os
 import time
 
 import boto3
@@ -195,3 +196,116 @@ def test_push_fails_loudly_if_log_group_does_not_exist():
         audit.record(action="exec", account_id="111", role="admin")
         with pytest.raises(Exception, match="ResourceNotFoundException|does not exist"):
             audit.push_to_cloudwatch("/does/not/exist", REGION)
+
+
+def test_forwarding_does_not_recurse_through_a_credential_process(monkeypatch):
+    # An ambient AWS profile backed by `ssobroker creds-process` records a new
+    # entry while push_to_cloudwatch is getting credentials. That entry must
+    # not start another push, in this process or in the child it spawns.
+    calls = []
+
+    def _push(*a, **k):
+        calls.append(os.environ.get("SSOBROKER_AUDIT_FORWARDING"))
+        audit.record(action="creds-process", account_id="111", role="admin")
+
+    monkeypatch.setattr(audit, "push_to_cloudwatch", _push)
+    audit.configure(
+        audit.AuditSettings(
+            forward=["cloudwatch"], cloudwatch_log_group=LOG_GROUP, cloudwatch_region=REGION
+        )
+    )
+    audit.record(action="exec", account_id="111", role="admin")
+    assert calls == ["1"]
+    assert "SSOBROKER_AUDIT_FORWARDING" not in os.environ
+    assert len(audit.tail(5)) == 2  # the nested entry is still logged locally
+
+
+class _FakeLogs:
+    class exceptions:  # noqa: N801 — mirrors botocore's client.exceptions
+        class ResourceAlreadyExistsException(Exception):
+            pass
+
+    def __init__(self, response=None):
+        self.batches: list[list[dict]] = []
+        self.response = response or {}
+
+    def create_log_stream(self, **kwargs):
+        pass
+
+    def put_log_events(self, **kwargs):
+        self.batches.append(kwargs["logEvents"])
+        return self.response
+
+
+def _write_log(entries: list[dict]) -> None:
+    audit.log_path().write_text("".join(json.dumps(e) + "\n" for e in entries), encoding="utf-8")
+
+
+def _ts(epoch: float) -> str:
+    return time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(epoch))
+
+
+def test_backfill_batches_never_span_more_than_24_hours(monkeypatch):
+    fake = _FakeLogs()
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: fake)
+    start = time.time() - 3 * 86400
+    _write_log([{"ts": _ts(start + h * 3600), "action": "exec"} for h in range(72)])
+
+    assert audit.push_to_cloudwatch(LOG_GROUP, REGION) == 72
+    assert len(fake.batches) >= 3
+    for batch in fake.batches:
+        assert batch[-1]["timestamp"] - batch[0]["timestamp"] < 24 * 3600 * 1000
+
+
+def test_backfill_batches_stay_under_the_request_size_limit(monkeypatch):
+    fake = _FakeLogs()
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: fake)
+    now = _ts(time.time())
+    _write_log([{"ts": now, "detail": "x" * 200_000} for _ in range(8)])
+
+    assert audit.push_to_cloudwatch(LOG_GROUP, REGION) == 8
+    assert len(fake.batches) >= 2
+    for batch in fake.batches:
+        assert sum(len(e["message"].encode()) + 26 for e in batch) <= 1_048_576
+
+
+def test_events_rejected_by_cloudwatch_are_reported(monkeypatch, capsys):
+    # End indexes are exclusive, the start index inclusive: events 0-1 too
+    # old/expired, event 3 too new.
+    info = {
+        "tooOldLogEventEndIndex": 1,
+        "expiredLogEventEndIndex": 2,
+        "tooNewLogEventStartIndex": 3,
+    }
+    fake = _FakeLogs({"rejectedLogEventsInfo": info})
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: fake)
+    _write_log([{"ts": _ts(time.time()), "action": "exec"} for _ in range(4)])
+
+    audit.push_to_cloudwatch(LOG_GROUP, REGION)
+    assert "CloudWatch rejected 3 audit entries" in capsys.readouterr().err
+
+
+def test_an_entry_too_large_for_cloudwatch_is_skipped_not_stuck(monkeypatch, capsys):
+    fake = _FakeLogs()
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: fake)
+    now = _ts(time.time())
+    _write_log([{"ts": now, "detail": "x" * 1_048_576}, {"ts": now, "action": "exec"}])
+
+    assert audit.push_to_cloudwatch(LOG_GROUP, REGION) == 1
+    (batch,) = fake.batches
+    assert json.loads(batch[0]["message"])["action"] == "exec"
+    assert "too large" in capsys.readouterr().err
+    assert audit.push_to_cloudwatch(LOG_GROUP, REGION) == 0  # cursor moved on
+
+
+def test_direct_push_also_marks_forwarding_for_credential_processes(monkeypatch):
+    # `audit-log --push-cloudwatch` calls push_to_cloudwatch directly; a
+    # credential_process it starts must still see the marker.
+    seen = []
+    fake = _FakeLogs()
+    fake.create_log_stream = lambda **k: seen.append(os.environ.get("SSOBROKER_AUDIT_FORWARDING"))
+    monkeypatch.setattr(boto3, "client", lambda *a, **k: fake)
+    _write_log([{"ts": _ts(time.time()), "action": "exec"}])
+    audit.push_to_cloudwatch(LOG_GROUP, REGION)
+    assert seen == ["1"]
+    assert "SSOBROKER_AUDIT_FORWARDING" not in os.environ
