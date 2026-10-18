@@ -7,6 +7,13 @@ entries (see `.github/workflows/release-please.yml`). It opens a release PR
 from the Conventional Commits on `main`, and merging that PR creates the tag
 and GitHub release. The project was called `orgctl` before 0.2.0.
 
+## [0.2.5](https://github.com/DustyStudy/aws-sso-broker/compare/v0.2.4...v0.2.5) (2026-10-18)
+
+
+### Bug Fixes
+
+* **security:** private Windows ACL, atomic cache writes, index locking, callback and profile-name hardening ([#37](https://github.com/DustyStudy/aws-sso-broker/issues/37)) ([6e0ce68](https://github.com/DustyStudy/aws-sso-broker/commit/6e0ce682ebe233d16d8adfb9589100652955eebf))
+
 ## [0.2.4](https://github.com/DustyStudy/aws-sso-broker/compare/v0.2.3...v0.2.4) (2026-10-17)
 
 
