@@ -33,12 +33,12 @@ and GitHub release. The project was called `orgctl` before 0.2.0.
 
 ### Features
 
-* harden sign-in, credential cache and audit trail for corporate use ([#9](https://github.com/DustyStudy/aws-sso-broker/issues/9)) ([b0db996](https://github.com/DustyStudy/aws-sso-broker/commit/b0db996a46b813e9264c9ffc0fa7b39a3a0cfb75))
+* harden sign-in, credential cache and audit trail ([#9](https://github.com/DustyStudy/aws-sso-broker/issues/9)) ([b0db996](https://github.com/DustyStudy/aws-sso-broker/commit/b0db996a46b813e9264c9ffc0fa7b39a3a0cfb75))
 
 
 ### Bug Fixes
 
-* refresh the SSO access token; add live proof of the corporate hardening ([#11](https://github.com/DustyStudy/aws-sso-broker/issues/11)) ([b6c84c2](https://github.com/DustyStudy/aws-sso-broker/commit/b6c84c29b8cd0a73be92b58033337b10dada896a))
+* refresh the SSO access token; add live proof of the sign-in and audit hardening ([#11](https://github.com/DustyStudy/aws-sso-broker/issues/11)) ([b6c84c2](https://github.com/DustyStudy/aws-sso-broker/commit/b6c84c29b8cd0a73be92b58033337b10dada896a))
 
 ## [0.2.1](https://github.com/DustyStudy/aws-sso-broker/compare/v0.2.0...v0.2.1) (2026-09-30)
 

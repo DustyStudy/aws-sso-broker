@@ -1,4 +1,4 @@
-"""Tests for the admin-managed policy and how it tightens user config."""
+"""Tests for the machine policy and how it tightens user config."""
 
 from __future__ import annotations
 
@@ -67,7 +67,7 @@ def test_start_url_must_be_https(tmp_path, monkeypatch):
 
 def test_start_url_allowlist_rejects_other_urls(orgs, tmp_path, monkeypatch):
     write_policy(
-        monkeypatch, tmp_path, "allowed_sso_start_urls: [https://corp.awsapps.com/start]\n"
+        monkeypatch, tmp_path, "allowed_sso_start_urls: [https://my-sso-portal.awsapps.com/start]\n"
     )
     with pytest.raises(ConfigError, match="not allowed"):
         orgs()
@@ -125,11 +125,11 @@ def test_policy_cloudwatch_settings_win(orgs, tmp_path, monkeypatch):
     write_policy(
         monkeypatch,
         tmp_path,
-        "cloudwatch_log_group: /corp/ssobroker\n"
+        "cloudwatch_log_group: /ssobroker/audit\n"
         "cloudwatch_account: logging\ncloudwatch_role: log-writer\n",
     )
     cfg = orgs("cloudwatch_log_group: /mine\n")
-    assert cfg.cloudwatch_log_group == "/corp/ssobroker"
+    assert cfg.cloudwatch_log_group == "/ssobroker/audit"
     assert (cfg.cloudwatch_account, cfg.cloudwatch_role) == ("logging", "log-writer")
 
 

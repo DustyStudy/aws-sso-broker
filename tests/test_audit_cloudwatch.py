@@ -60,7 +60,7 @@ def test_push_sends_all_recorded_entries(logs_client):
     audit.record(
         action="exec", account_id="111111111111", role="admin", command=["aws", "s3", "ls"]
     )
-    audit.record(action="shell", account_id="222222222222", role="read-only", reason="JIRA-42")
+    audit.record(action="shell", account_id="222222222222", role="read-only", reason="rotate-keys")
 
     n = audit.push_to_cloudwatch(LOG_GROUP, REGION)
     assert n == 2

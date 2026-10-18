@@ -22,11 +22,11 @@ def test_network_settings_applied_to_environment(monkeypatch):
     for name in ("AWS_CA_BUNDLE", "HTTPS_PROXY", "AWS_USE_FIPS_ENDPOINT"):
         monkeypatch.delenv(name, raising=False)
     network.apply(
-        _cfg(ca_bundle="/etc/corp-ca.pem", https_proxy="http://proxy:8080", use_fips_endpoint=True)
+        _cfg(ca_bundle="/etc/proxy-ca.pem", https_proxy="http://proxy:8080", use_fips_endpoint=True)
     )
     import os
 
-    assert os.environ["AWS_CA_BUNDLE"] == "/etc/corp-ca.pem"
+    assert os.environ["AWS_CA_BUNDLE"] == "/etc/proxy-ca.pem"
     assert os.environ["HTTPS_PROXY"] == "http://proxy:8080"
     assert os.environ["AWS_USE_FIPS_ENDPOINT"] == "true"
 

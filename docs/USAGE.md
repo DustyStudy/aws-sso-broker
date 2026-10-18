@@ -41,12 +41,12 @@ the other install options, every command and the configuration files.
   commodity infostealers copy. Prints names, counts and expiry only;
   `--strict` fails the check. See threat scenario 9 in
   [THREAT_MODEL.md](THREAT_MODEL.md).
-- **Admin-managed policy** (`/etc/ssobroker/policy.yaml`,
+- **Machine policy** (`/etc/ssobroker/policy.yaml`,
   `%ProgramData%\ssobroker\policy.yaml`): pin the allowed Identity Center
   start URLs, cap session length, add guardrails, turn off device-code sign-in
   and environment-variable overrides. It can only tighten a user's settings.
-  See [docs/ENTERPRISE.md](ENTERPRISE.md).
-- **Corporate networks**: `ca_bundle`, `https_proxy` and `use_fips_endpoint`
+  See [docs/HARDENING.md](HARDENING.md).
+- **Proxies and FIPS endpoints**: `ca_bundle`, `https_proxy` and `use_fips_endpoint`
   in `orgs.yaml`.
 - **Native `credential_process` support** (`ssobroker creds-process`): wire it
   into `~/.aws/config` and `aws`/`terraform`/boto3 work with plain
@@ -152,8 +152,8 @@ ssobroker accounts --tag security
 
 # Attach a justification to a command or session (recorded in the local
 # audit log only; see note below on why this isn't an AWS-side session tag)
-ssobroker exec -a prod -r admin --reason "JIRA-1234" -- terraform apply
-ssobroker shell -a prod -r admin --reason "JIRA-1234"
+ssobroker exec -a prod -r admin --reason "rotate KMS key" -- terraform apply
+ssobroker shell -a prod -r admin --reason "check billing alarm"
 
 # Advisory pre-check: would this role's identity-based policies allow an
 # action, before you actually run something relying on it
@@ -206,8 +206,8 @@ about it is overwritten. The file is edited in place as text, so comments,
 formatting, and every other profile are preserved exactly as you wrote them.
 If a run changes the file, the previous version is first saved as a new
 timestamped `~/.aws/config.bak-<stamp>` (earlier backups are never
-overwritten); a re-run that changes nothing writes nothing. `--prefix corp`
-names profiles `corp-<alias>` (`corp-<alias>-<role>` with `--all-roles`), and
+overwritten); a re-run that changes nothing writes nothing. `--prefix sso`
+names profiles `sso-<alias>` (`sso-<alias>-<role>` with `--all-roles`), and
 two registry entries that would map to the same profile name are rejected
 rather than one silently winning. ssobroker doesn't delete profiles it wrote
 earlier, so if you change `--prefix`/`--all-roles`, remove the old
@@ -241,7 +241,7 @@ deny/require-confirmation glob patterns on top of the built-in defaults
 (blocks things like `organizations leave-organization`, `close-account`,
 recursive `s3 rm`, etc.).
 
-### Managed policy (optional, for admins)
+### Machine policy (optional)
 
 See [`config/policy.example.yaml`](../config/policy.example.yaml) and
-[docs/ENTERPRISE.md](ENTERPRISE.md).
+[docs/HARDENING.md](HARDENING.md).

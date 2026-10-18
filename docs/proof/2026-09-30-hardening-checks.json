@@ -1,5 +1,5 @@
 {
-  "note": "Live run of the corporate-hardening release (main at b0db996, PR #9, plus the refresh-token fix on this branch) against a real IAM Identity Center instance. Windows 11, Python 3.12, boto3 1.43.104, aws-cli 2.37.4. SSOBROKER_HOME pointed at a throwaway directory; ProgramData pointed at a throwaway directory so the real managed-policy code path ran without writing to the machine. Account IDs, the SSO user and access keys are masked. Every result below comes from AWS's own responses or files on disk, not from ssobroker's own output alone.",
+  "note": "Live run of the sign-in and audit hardening release (main at b0db996, PR #9, plus the refresh-token fix on this branch) against a real IAM Identity Center instance. Windows 11, Python 3.12, boto3 1.43.104, aws-cli 2.37.4. SSOBROKER_HOME pointed at a throwaway directory; ProgramData pointed at a throwaway directory so the real managed-policy code path ran without writing to the machine. Account IDs, the SSO user and access keys are masked. Every result below comes from AWS's own responses or files on disk, not from ssobroker's own output alone.",
   "identity_center": {
     "start_url": "https://d-xxxxxxxxxx.awsapps.com/start",
     "sso_region": "us-east-2"
