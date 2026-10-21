@@ -69,9 +69,9 @@ boto3-stubs==1.43.108 \
     --hash=sha256:40f02e30f6e455ccb658dcdeb5756ce23bde767f425ab6d7f57a9ffad75a848c \
     --hash=sha256:a1ed29b4c7957568e6261fc36d4c59025c004997a229e8f01940c205f2128e4a
     # via aws-sso-broker (pyproject.toml)
-botocore==1.43.104 \
-    --hash=sha256:099f84876df9f6dc23a24b4d8c02da2d73c6949249761dd85585f735b825c182 \
-    --hash=sha256:a447978a815f8ac7ef2f4ba103b6a0c310e56536386974df769edb1326f3b208
+botocore==1.43.113 \
+    --hash=sha256:8908e4a5fe94a06801a7bf4c451717a38145cc4ffa41aaffa50665940b64b4fa \
+    --hash=sha256:941d3f0e289540da7c49d5e2dc022f992e3638127a02a74a0c91df2661bd98ef
     # via
     #   boto3
     #   moto
