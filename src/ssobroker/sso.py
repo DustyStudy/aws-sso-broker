@@ -254,7 +254,7 @@ def _show_url(url: str, open_browser: bool, what: str) -> None:
     if open_browser:
         try:
             webbrowser.open(url)
-        except Exception:
+        except Exception:  # noqa: S110
             pass  # headless environment — the printed URL is enough
 
 

@@ -169,7 +169,7 @@ def run(
         access_key_id=creds["AccessKeyId"],
     )
 
-    proc = subprocess.run(command, env=env)
+    proc = subprocess.run(command, env=env)  # noqa: S603 - runs the command the user typed, by design
     return proc.returncode
 
 
@@ -231,7 +231,7 @@ def spawn_shell(
             file=sys.stderr,
         )
 
-    proc = subprocess.run([shell], env=env)
+    proc = subprocess.run([shell], env=env)  # noqa: S603 - the user's own shell, by design
     return proc.returncode
 
 

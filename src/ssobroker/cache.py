@@ -88,7 +88,7 @@ if sys.platform == "win32":
 
     @functools.cache
     def _current_user_sid() -> str:
-        out = subprocess.run(
+        out = subprocess.run(  # noqa: S603 - fixed argv, absolute path to whoami.exe
             [
                 os.path.join(os.environ.get("SystemRoot", r"C:\Windows"), "System32", "whoami.exe"),
                 "/user",
@@ -360,7 +360,7 @@ def put(key: str, value: dict, *, keyring: bool | None = None) -> None:
                 if p.exists():
                     p.unlink()
                 return
-            except Exception:
+            except Exception:  # noqa: S110 - keychain write failed: fall back to the file cache below
                 pass
         if keyring:
             return  # keychain was asked for explicitly: don't cache rather than write a file
