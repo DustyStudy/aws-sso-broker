@@ -34,7 +34,7 @@ jobs:
 
       - name: Install and run ruff + bandit
         run: |
-          python -m pip install --require-hashes -r requirements/dev.txt -r requirements/lint.txt
+          python -m pip install --require-hashes -r requirements/dev.txt
           python -m pip install --no-deps -e .
           ruff check .
           ruff format --check src tests
