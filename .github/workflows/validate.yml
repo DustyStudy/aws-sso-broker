@@ -15,7 +15,7 @@ permissions:
 
 jobs:
   python:
-    name: ruff + bandit (Python)
+    name: ruff + mypy (Python)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -32,11 +32,10 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Install and run ruff + bandit
+      - name: Install and run ruff + mypy
         run: |
           python -m pip install --require-hashes -r requirements/dev.txt
           python -m pip install --no-deps -e .
           ruff check .
           ruff format --check src tests
           mypy src
-          bandit -r . -ll --exclude ./.git

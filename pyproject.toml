@@ -40,7 +40,6 @@ dev = [
     "hypothesis>=6.100",
     "moto>=5.0",
     "ruff>=0.6",
-    "bandit>=1.7",
     "mypy>=1.10",
     "types-PyYAML>=6.0",
     "boto3-stubs[sso,sso-oidc,iam,sts,logs]>=1.34",
@@ -70,8 +69,12 @@ line-length = 100
 target-version = "py311"
 
 [tool.ruff.lint]
-select = ["E", "F", "I", "UP", "B"]
+select = ["E", "F", "I", "UP", "B", "S"]
 ignore = ["E501"]  # line length handled by formatter, not the linter
+
+[tool.ruff.lint.per-file-ignores]
+# Tests check with assert, use fake tokens and run subprocesses.
+"tests/*" = ["S"]
 
 [tool.mypy]
 python_version = "3.11"
