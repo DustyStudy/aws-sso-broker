@@ -2,5 +2,5 @@
 #   uv pip compile requirements/release.in --universal --generate-hashes --python-version 3.11 -o requirements/release.txt
 build
 cyclonedx-bom
-setuptools>=68
+setuptools>=84.1.0
 wheel
