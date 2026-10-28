@@ -214,10 +214,10 @@ def _usable_token(
         )
     except ClientError:
         return None  # session ended or was revoked: sign in again
-    token = dict(token)
+    refreshed = dict(token)
     # OAuth lets a refresh response omit the refresh token; keep using the old one then.
-    token.setdefault("refreshToken", refresh_token)
-    return _store_token(cache_key, token, cached["issuedAt"], flow, region, max_session_hours)
+    refreshed.setdefault("refreshToken", refresh_token)
+    return _store_token(cache_key, refreshed, cached["issuedAt"], flow, region, max_session_hours)
 
 
 def _registered_client(oidc, start_url: str, region: str, flow: str) -> tuple[str, str]:
