@@ -75,9 +75,11 @@ account, same role, until expiry. This is inherent to any tool that caches
 credentials locally at all, not something a config change in `ssobroker`
 fixes; it's why `max_session_hours` exists (force re-auth sooner than AWS's
 own token expiry) and why `ssobroker logout` clearing the cache immediately is
-part of the documented incident-response step. The cached refresh token
-only works until `max_session_hours` after the original sign-in and while
-the Identity Center session is valid. `logout` also calls the SSO
+part of the documented incident-response step. `max_session_hours` only
+limits how long `ssobroker` itself reuses the cached refresh token; AWS never
+sees that setting. A refresh token copied off the machine keeps working in
+another client until the Identity Center session ends (its configured
+session duration) or is revoked. `logout` also calls the SSO
 portal's `Logout` API, so the stolen SSO access and refresh tokens stop
 working at AWS, not just locally. Role credentials already issued stay valid until they expire;
 `role_credential_cache: keyring` (or `none`) keeps them off disk, and cached

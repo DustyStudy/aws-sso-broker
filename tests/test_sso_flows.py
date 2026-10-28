@@ -454,6 +454,20 @@ def test_expired_access_token_is_refreshed_without_a_browser(monkeypatch):
     assert time.time() - stored["issuedAt"] == pytest.approx(2 * 3600, abs=5)
 
 
+def test_refresh_without_a_new_refresh_token_keeps_the_old_one(monkeypatch):
+    # OAuth (RFC 6749 section 6) lets the server leave out a replacement refresh token.
+    oidc = RefreshingOidc()
+    oidc.create_token = lambda **kw: {"accessToken": "refreshed", "expiresIn": 3600}
+    monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: oidc)
+    _cache_refreshable(issued_ago=2 * 3600, access_left=-10)
+
+    sso.login(START_URL, REGION)
+
+    stored = cache.get(sso._token_cache_key(START_URL, REGION))
+    assert stored["refreshToken"] == "rt"
+    assert stored["expiresAt"] > stored["accessTokenExpiresAt"]  # still kept to the session cap
+
+
 def test_valid_access_token_is_not_refreshed(monkeypatch):
     monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: pytest.fail("called AWS"))
     _cache_refreshable(issued_ago=60, access_left=1800)

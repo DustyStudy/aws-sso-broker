@@ -187,6 +187,38 @@ def test_policy_not_owned_by_root_is_refused(tmp_path, monkeypatch):
         policy.load()
 
 
+_USER = "S-1-5-21-1-2-3-1001"
+
+
+@pytest.mark.parametrize(
+    ("sddl", "writers"),
+    [
+        # The HARDENING.md recipe: admins and SYSTEM write, users read and execute.
+        ("O:BAD:PAI(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)(A;OICI;0x1200a9;;;BU)", []),
+        # A standard user created the folder first and still owns it.
+        (f"O:{_USER}D:P(A;OICI;FA;;;SY)(A;OICI;FA;;;BA)", [f"owner {_USER}"]),
+        # The user's own grant survived /grant:r for the named principals.
+        (f"O:BAD:P(A;OICI;FA;;;SY)(A;;0x1301bf;;;{_USER})", [_USER]),
+        # %ProgramData%'s default lets Users create files in a new subfolder.
+        ("O:BAD:AI(A;OICIID;FA;;;SY)(A;CIID;DCLCRPCR;;;BU)", ["BU"]),
+        # Deny and inherit-only (CREATOR OWNER) entries grant nothing here.
+        ("O:SYD:P(D;;FA;;;WD)(A;OICIIO;GA;;;CO)(A;;FA;;;BA)", []),
+    ],
+)
+def test_untrusted_writers_of_a_windows_policy(sddl, writers):
+    assert policy.untrusted_writers(sddl) == writers
+
+
+@pytest.mark.skipif(sys.platform != "win32", reason="Windows ACL check")
+def test_windows_policy_in_a_user_owned_folder_is_refused(tmp_path, monkeypatch):
+    path = tmp_path / "policy.yaml"
+    path.write_text("max_session_hours: 1\n")
+    monkeypatch.setattr(policy, "managed_policy_path", lambda: path)
+    policy.load.cache_clear()
+    with pytest.raises(policy.PolicyError, match="can be changed by"):
+        policy.load()
+
+
 def test_cloudwatch_account_can_be_a_bare_account_id(orgs):
     cfg = orgs("cloudwatch_account: '444444444444'\ncloudwatch_role: AuditLogWriter\n")
     assert config.logging_account_id(cfg) == "444444444444"

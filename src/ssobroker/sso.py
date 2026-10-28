@@ -214,7 +214,10 @@ def _usable_token(
         )
     except ClientError:
         return None  # session ended or was revoked: sign in again
-    return _store_token(cache_key, dict(token), cached["issuedAt"], flow, region, max_session_hours)
+    token = dict(token)
+    # OAuth lets a refresh response omit the refresh token; keep using the old one then.
+    token.setdefault("refreshToken", refresh_token)
+    return _store_token(cache_key, token, cached["issuedAt"], flow, region, max_session_hours)
 
 
 def _registered_client(oidc, start_url: str, region: str, flow: str) -> tuple[str, str]:
@@ -530,7 +533,9 @@ def fetch_role_credentials(
     cache_key = _role_creds_cache_key(sso_token, account_id, role_name)
     fingerprint = _token_fingerprint(sso_token)
 
-    if storage != "none":
+    if storage == "none":
+        cache.clear(cache_key)  # drop copies stored under an earlier, looser setting
+    else:
         cached = cache.get(cache_key, keyring=use_keyring)
         if (
             cached

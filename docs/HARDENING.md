@@ -49,15 +49,19 @@ Put a `policy.yaml` where your everyday account can't write:
 | OS | Path | Protection |
 |---|---|---|
 | Linux, macOS | `/etc/ssobroker/policy.yaml` | File and directory owned by root and not group/world-writable. Otherwise `ssobroker` refuses to run. |
-| Windows | `%ProgramData%\ssobroker\policy.yaml` | Create the folder with an ACL that only Administrators and SYSTEM can write. Users get read. |
+| Windows | `%ProgramData%\ssobroker\policy.yaml` | File and folder owned by Administrators or SYSTEM, and nobody else can write them. Otherwise `ssobroker` refuses to run. |
 
-On Windows, set the ACL when you create the folder. By default a standard
-user can create new folders under `%ProgramData%`:
+On Windows, create the folder from an elevated PowerShell. A standard user
+can create folders under `%ProgramData%`, so a folder that already exists may
+belong to someone else: delete it and start over instead of reusing it.
 
 ```powershell
 $dir = "$env:ProgramData\ssobroker"
-New-Item -ItemType Directory -Force $dir | Out-Null
+if (Test-Path $dir) { Remove-Item -Recurse -Force $dir }
+New-Item -ItemType Directory $dir | Out-Null
+icacls $dir /setowner Administrators
 icacls $dir /inheritance:r /grant:r "SYSTEM:(OI)(CI)F" "Administrators:(OI)(CI)F" "Users:(OI)(CI)RX"
+# Then copy policy.yaml in; it inherits this ACL.
 ```
 
 [`config/policy.example.yaml`](../config/policy.example.yaml) lists every
@@ -109,8 +113,12 @@ that denies everything with `aws:TokenIssueTime` before the incident time
 Every `exec`, `shell` and `export-env`, and every `creds-process` call that
 got new credentials, writes one JSON line to `~/.ssobroker/audit.log`.
 Values of secret-looking arguments (`--secret-string`, `--password=...`,
-`DB_PASSWORD=...`, and more; add your own with `audit_redact_flags`) are
-replaced with `***REDACTED***` first.
+`DB_PASSWORD=...`, `--cli-input-json`, credential headers such as
+`Authorization: Bearer ...`, inline JSON that names a secret-looking key, and
+more; add your own with `audit_redact_flags`) are replaced with
+`***REDACTED***` first. This is pattern matching: a secret passed in an
+argument that looks like none of these is logged as typed, so pass secrets
+through files or environment variables rather than on the command line.
 
 Each entry includes `access_key_id`, the temporary key used for that action.
 CloudTrail records the same key on every API call made with it

@@ -148,6 +148,30 @@ def test_explicit_keyring_without_a_keychain_writes_no_file(tmp_path, monkeypatc
     assert not list(cache.cache_dir().glob("role-creds_*.json"))
 
 
+def test_explicit_keyring_ignores_and_removes_a_leftover_file(tmp_path, monkeypatch):
+    # Switching role_credential_cache from file to keyring must not keep
+    # reusing the plaintext copy the file setting left behind.
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
+    cache.put("role-creds_k", {"secret": "x", "expiresAt": time.time() + 600}, keyring=False)
+    for kr in (_EmptyKeyring(), None):  # keychain with nothing in it, then no keychain
+        monkeypatch.setattr(cache, "_keyring_module", lambda kr=kr: kr)
+        assert cache.get("role-creds_k", keyring=True) is None
+    assert not list(cache.cache_dir().glob("role-creds_*.json"))
+
+
+class _EmptyKeyring:
+    def get_password(self, *a):
+        return None
+
+
+def test_no_file_cache_when_the_folder_could_not_be_made_private(tmp_path, monkeypatch):
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
+    monkeypatch.setattr(cache, "_ensure_private_acl", lambda base: False, raising=False)
+    monkeypatch.setattr(cache, "_files_private", False)
+    cache.put("sso-token_x", {"accessToken": "secret", "expiresAt": time.time() + 600})
+    assert not list(cache.cache_dir().glob("*.json"))
+
+
 @pytest.mark.skipif(sys.platform != "win32", reason="Windows ACLs")
 def test_windows_state_folder_gets_a_private_acl(tmp_path, monkeypatch):
     import subprocess

@@ -136,6 +136,11 @@ def load(path: Path | None = None) -> OrgConfig:
             account_id = policy.account_id(a["account_id"])
         except ValueError as e:
             raise ConfigError(f"Account '{alias}': {e}") from e
+        # Aliases win over IDs in resolve_account, so an ID-shaped alias must be its own ID.
+        if str(alias).isdigit() and len(str(alias)) == 12 and str(alias) != account_id:
+            raise ConfigError(
+                f"Account alias '{alias}' looks like an account ID but points at {account_id}."
+            )
         default_role = a.get("default_role")
         accounts[alias] = Account(
             alias=alias,

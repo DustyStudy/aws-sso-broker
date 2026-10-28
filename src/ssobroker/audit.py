@@ -21,6 +21,7 @@ import json
 import logging
 import logging.handlers
 import os
+import re
 import socket
 import sys
 import time
@@ -50,7 +51,13 @@ DEFAULT_REDACT_PATTERNS = [
     "*api_key*",
     "*apikey*",
     "*credential*",
+    "cli-input-*",  # --cli-input-json/--cli-input-yaml carry whole request bodies
 ]
+# HTTP headers that carry credentials, e.g. curl -H "Authorization: Bearer ...".
+_SECRET_HEADER_RE = re.compile(
+    r"((?:proxy-)?authorization|cookie|x-api-key|x-auth-token|x-amz-security-token)(\s*:\s*).+",
+    re.IGNORECASE,
+)
 
 _SYSLOG_FACILITY = logging.handlers.SysLogHandler.LOG_AUTH
 
@@ -103,8 +110,11 @@ def _is_secret_name(name: str, patterns: list[str]) -> bool:
 def redact_command(command: list[str], extra_patterns: list[str] | None = None) -> list[str]:
     """Replace values of secret-looking flags and NAME=value arguments.
 
-    Handles `--flag value`, `--flag=value` and `NAME=value`. The flag name is
-    kept so the log still shows what was run."""
+    Handles `--flag value`, `--flag=value` and `NAME=value`, credential HTTP
+    headers (`Authorization: ...`), and inline JSON/YAML documents that mention
+    a secret-looking key. The flag name is kept so the log still shows what was
+    run. This is pattern matching, not a guarantee: a secret in an argument
+    that looks like none of these is logged as typed."""
     patterns = DEFAULT_REDACT_PATTERNS + list(extra_patterns or [])
     out: list[str] = []
     redact_next = False
@@ -112,6 +122,14 @@ def redact_command(command: list[str], extra_patterns: list[str] | None = None) 
         if redact_next:
             out.append(REDACTED)
             redact_next = False
+            continue
+        header = _SECRET_HEADER_RE.sub(rf"\1\2{REDACTED}", arg)
+        if header != arg:
+            out.append(header)
+            continue
+        flag, sep, value = arg.partition("=") if arg.startswith("-") else ("", "", arg)
+        if value.lstrip().startswith(("{", "[")) and _is_secret_name(value, patterns):
+            out.append(f"{flag}{sep}{REDACTED}")
             continue
         if arg.startswith("-"):
             name, sep, _value = arg.partition("=")

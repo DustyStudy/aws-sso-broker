@@ -59,14 +59,20 @@ def keyring_available() -> bool:
     return _keyring_module() is not None
 
 
+# False once the Windows state folder could not be made private; put() then
+# refuses to write credentials to files there.
+_files_private = True
+
+
 def cache_dir() -> Path:
+    global _files_private
     base = home_dir()
     d = base / "cache"
     d.mkdir(parents=True, exist_ok=True)
     _lock_down(base)
     _lock_down(d)
     if sys.platform == "win32":
-        _ensure_private_acl(base)
+        _files_private = _ensure_private_acl(base)
     return d
 
 
@@ -102,17 +108,21 @@ if sys.platform == "win32":
         ).stdout
         return out.strip().split(",")[-1].strip('"')
 
-    def _dacl_sddl(path: Path) -> str:
+    _OWNER_INFO = 0x1
+
+    def _dacl_sddl(path: Path, *, owner: bool = False) -> str:
+        """The DACL of `path` as SDDL, with its owner (O:...) in front when asked."""
+        info = _DACL_INFO | (_OWNER_INFO if owner else 0)
         sd = ctypes.c_void_p()
         err = _advapi32.GetNamedSecurityInfoW(
-            str(path), _SE_FILE_OBJECT, _DACL_INFO, None, None, None, None, ctypes.byref(sd)
+            str(path), _SE_FILE_OBJECT, info, None, None, None, None, ctypes.byref(sd)
         )
         if err:
             raise ctypes.WinError(err)
         try:
             text = ctypes.c_wchar_p()
             if not _advapi32.ConvertSecurityDescriptorToStringSecurityDescriptorW(
-                sd, _SDDL_REVISION_1, _DACL_INFO, ctypes.byref(text), None
+                sd, _SDDL_REVISION_1, info, ctypes.byref(text), None
             ):
                 raise ctypes.WinError(ctypes.get_last_error())
             try:
@@ -148,16 +158,19 @@ if sys.platform == "win32":
         drive = os.path.splitdrive(os.path.abspath(path))[0]
         return drive.startswith("\\\\") or (_kernel32.GetDriveTypeW(drive + "\\") == _DRIVE_REMOTE)
 
-    def _ensure_private_acl(base: Path) -> None:
+    def _ensure_private_acl(base: Path) -> bool:
         """chmod can't restrict readers on Windows. Give the state folder an
         exact, non-inherited ACL (this user and SYSTEM, full control) and make
         everything in it inherit only that. Checked on every run, so a copy or
         restore that loosened it gets fixed. Skipped on network drives, where
         the share may know this user under another identity and the ACL could
-        lock them out."""
+        lock them out; there the share's own permissions apply.
+
+        Returns False when the ACL could not be set, so nothing secret is
+        written into a folder other users may be able to read."""
         try:
             if _on_network_drive(base):
-                return
+                return True
             sid = _current_user_sid()
             want = sorted([f"A;OICI;FA;;;{sid}", "A;OICI;FA;;;SY"])
             current = _dacl_sddl(base)
@@ -173,7 +186,13 @@ if sys.platform == "win32":
                     if sddl.startswith("D:P") or any("ID" not in a.split(";")[1] for a in aces):
                         _set_dacl(path, "D:AI", _UNPROTECTED_DACL)
         except (OSError, subprocess.CalledProcessError) as e:
-            print(f"ssobroker: could not restrict access to {base}: {e}", file=sys.stderr)
+            print(
+                f"ssobroker: could not restrict access to {base}: {e}; "
+                "credentials will not be cached in files there",
+                file=sys.stderr,
+            )
+            return False
+        return True
 
 
 def _lock_down(path: Path) -> None:
@@ -326,6 +345,11 @@ def get(key: str, *, keyring: bool | None = None, include_expired: bool = False)
                         _keyring_delete(key)
                         return None
                     return data
+        if keyring:
+            # Keychain asked for explicitly: never reuse a plaintext copy left
+            # from an earlier `file` setting, and remove it.
+            _path_for(key).unlink(missing_ok=True)
+            return None
         # Fall through to file cache — covers both "keyring unavailable"
         # and "nothing found under this key in the keychain yet".
 
@@ -366,6 +390,8 @@ def put(key: str, value: dict, *, keyring: bool | None = None) -> None:
             return  # keychain was asked for explicitly: don't cache rather than write a file
 
     p = _path_for(key)
+    if not _files_private:
+        return  # the folder isn't private (see _ensure_private_acl): don't cache
     _write_locked_down(p, json.dumps(value))
 
 
