@@ -151,6 +151,8 @@ def untrusted_writers(sddl: str) -> list[str]:
     owner = re.match(r"O:(S-[\d-]+|[A-Z]{2})", sddl)
     if not owner or owner.group(1) not in _WIN_TRUSTED_SIDS:
         found.append(f"owner {owner.group(1) if owner else '?'}")
+    if "D:" not in sddl or "NO_ACCESS_CONTROL" in sddl:
+        found.append("everyone (no access control list)")  # a null DACL allows all access
     for ace in re.findall(r"\(([^)]*)\)", sddl):
         kind, flags, rights, *_rest, sid = ace.split(";")
         # Deny ACEs grant nothing and inherit-only ACEs don't apply here. Any

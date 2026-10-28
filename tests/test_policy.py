@@ -203,6 +203,8 @@ _USER = "S-1-5-21-1-2-3-1001"
         ("O:BAD:AI(A;OICIID;FA;;;SY)(A;CIID;DCLCRPCR;;;BU)", ["BU"]),
         # Deny and inherit-only (CREATOR OWNER) entries grant nothing here.
         ("O:SYD:P(D;;FA;;;WD)(A;OICIIO;GA;;;CO)(A;;FA;;;BA)", []),
+        # A null DACL has no entries at all, and allows everyone everything.
+        ("O:BAD:NO_ACCESS_CONTROL", ["everyone (no access control list)"]),
     ],
 )
 def test_untrusted_writers_of_a_windows_policy(sddl, writers):
