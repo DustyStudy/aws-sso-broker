@@ -1,15 +1,51 @@
 # Proof that ssobroker works
 
-Two live runs against a real AWS Organization's real IAM Identity Center
+Three live runs against a real AWS Organization's real IAM Identity Center
 instance. Account IDs, the SSO user and access keys are masked in the text
 and in the evidence files under [`proof/`](proof/).
 
+- [Run 3 (2026-10-28)](#run-3-2026-10-28-v028-from-the-release-on-a-real-windows-install):
+  v0.2.8 installed from the attested release wheel, with the OS keychain and a
+  real `%ProgramData%` policy folder. Covers two items Run 2 couldn't: the
+  keychain backend and a real Windows folder ACL. Found nothing.
 - [Run 2 (2026-09-30)](#run-2-2026-09-30-sign-in-and-audit-hardening): the sign-in
   and audit hardening from PR #9: PKCE sign-in, server-side logout, managed policy,
   audit redaction and forwarding, CloudTrail join. **Found one real problem**
   (hourly re-login) and fixed it in the same PR as this proof.
 - [Run 1 (2026-09-23)](#run-1-2026-09-23-core-behavior): core behavior:
   credentials, guardrails, audit log, `sync-aws-config`, logout. Found nothing.
+
+## Run 3 (2026-10-28): v0.2.8 from the release, on a real Windows install
+
+Installed the published v0.2.8 wheel (not a clone) with
+`uv tool install "aws-sso-broker[keyring] @ <wheel>"` on Windows 11, using the
+real `~/.ssobroker` and the real `C:\ProgramData\ssobroker`. Unlike Run 2,
+nothing was redirected to a throwaway directory.
+
+| | |
+|---|---|
+| **Identity Center** | Real instance in us-east-2, signed in through the browser |
+| **Accounts** | Management, dev and one application account; `ReadOnlyAccess` (default) and `AdministratorAccess` on dev |
+| **Settings** | `role_credential_cache: keyring`; a managed policy pinning `allowed_sso_start_urls`, installed with the [HARDENING.md](HARDENING.md#2-the-machine-policy) recipe from an elevated PowerShell |
+
+| # | Claim | Result | How it was checked |
+|---|---|---|---|
+| 1 | The release wheel was built by this repo's release workflow | **Proven** | `gh attestation verify aws_sso_broker-0.2.8-py3-none-any.whl --repo DustyStudy/aws-sso-broker` exited 0 |
+| 2 | With the `keyring` extra, the SSO token goes to the OS keychain, not a file | **Proven** | After `login`, Windows Credential Manager held the `ssobroker` entries; `cache/` held only the client registration and the keychain index |
+| 3 | `list-remote` uses the stored token and reflects live grants | **Proven** | No second browser prompt; returned the same three accounts and roles as the Identity Center portal |
+| 4 | `role_credential_cache: keyring` keeps role credentials off disk | **Proven** | `exec` added one Credential Manager entry (3 to 4); no role-credentials file appeared in `cache/` |
+| 5 | `exec` runs under the account's default role and is audited | **Proven** | `aws sts get-caller-identity` returned an `AWSReservedSSO_ReadOnlyAccess_…` assumed-role ARN in the dev account; `audit.log` recorded `exec` with the account, role, command and the temporary `ASIA…` key ID |
+| 6 | A policy folder set up with the HARDENING.md recipe is accepted | **Proven** | `doctor`: `OK managed policy applied: C:\ProgramData\ssobroker\policy.yaml` |
+| 7 | A policy file that standard users can change is refused | **Proven** | After `icacls … /grant "Users:M"` on `policy.yaml`, `doctor` exited with `Refusing managed policy: … can be changed by BU`. Removing the grant restored it |
+
+### What this run does not prove
+
+- **A policy folder owned by a standard user.** Claim 7 tested an added
+  write grant; the owner check is covered by unit and Windows CI tests.
+- **Token refresh, `logout`, guardrails, `sync-aws-config` and CloudWatch
+  forwarding.** Covered by Runs 1 and 2 and not repeated here. The v0.2.8
+  changes to refresh (keep the old refresh token) and `sync-aws-config`
+  (write account IDs) are covered by unit tests only.
 
 ## Run 2 (2026-09-30): sign-in and audit hardening
 
@@ -74,11 +110,12 @@ Also worth knowing, but not bugs:
 - **The OS keychain backend.** The `keyring` extra wasn't installed, so
   tokens used the 0600-file cache. It was skipped deliberately: the keychain
   entry name is shared with any real ssobroker install on the same machine.
+  (Proven in Run 3.)
 - **syslog and Windows Event Log forwarding.** Only CloudWatch was run live.
 - **The POSIX root-ownership check on `/etc/ssobroker/policy.yaml`.** This run
   was on Windows; the check is covered by unit tests on Linux and macOS CI.
 - **A real Windows folder ACL on `%ProgramData%\ssobroker`.** The policy was
-  read from a redirected `ProgramData`.
+  read from a redirected `ProgramData`. (Proven in Run 3.)
 - **`ca_bundle`, `https_proxy`, `use_fips_endpoint`** against a real proxy or
   FIPS endpoint.
 - **Refresh up to the session cap in real time.** Expiry was forced by editing

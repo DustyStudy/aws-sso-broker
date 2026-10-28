@@ -13,9 +13,10 @@ Log in once via your org's Identity Center portal, then run commands or open a
 shell against any account/role you're granted, with short-lived, auto-expiring
 credentials and a local audit trail.
 
-**Verified live:** two runs against a real IAM Identity Center instance, with
-all 12 hardening claims proven. The second run caught a regression that would
-have forced users to sign in every hour, fixed before release.
+**Verified live:** three runs against a real IAM Identity Center instance. The
+second caught a regression that would have forced users to sign in every hour,
+fixed before release. The third ran the published v0.2.8 release with the OS
+keychain and a real Windows machine-policy ACL.
 [Evidence](docs/PROOF.md).
 
 ## Why
