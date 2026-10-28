@@ -1,3 +1,4 @@
+import json
 import os
 import stat
 import sys
@@ -162,6 +163,16 @@ def test_explicit_keyring_ignores_and_removes_a_leftover_file(tmp_path, monkeypa
 class _EmptyKeyring:
     def get_password(self, *a):
         return None
+
+
+def test_explicit_keyring_hit_still_removes_a_leftover_file(tmp_path, monkeypatch):
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
+    cache.put("role-creds_k", {"secret": "old", "expiresAt": time.time() + 600}, keyring=False)
+    entry = json.dumps({"secret": "new", "expiresAt": time.time() + 600})
+    keychain = type("K", (), {"get_password": lambda self, *a: entry})()
+    monkeypatch.setattr(cache, "_keyring_module", lambda: keychain)
+    assert cache.get("role-creds_k", keyring=True)["secret"] == "new"
+    assert not list(cache.cache_dir().glob("role-creds_*.json"))
 
 
 def test_no_file_cache_when_the_folder_could_not_be_made_private(tmp_path, monkeypatch):

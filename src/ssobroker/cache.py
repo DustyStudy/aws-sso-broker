@@ -328,6 +328,10 @@ def get(key: str, *, keyring: bool | None = None, include_expired: bool = False)
     None means the default for that key (keychain for SSO tokens).
     `include_expired` returns an expired entry as-is instead of deleting it."""
     if _use_keyring_for(key, keyring):
+        if keyring:
+            # Keychain asked for explicitly: never reuse a plaintext copy left
+            # from an earlier `file` setting, and remove it.
+            _path_for(key).unlink(missing_ok=True)
         kr = _keyring_module()
         if kr is not None:
             try:
@@ -346,9 +350,6 @@ def get(key: str, *, keyring: bool | None = None, include_expired: bool = False)
                         return None
                     return data
         if keyring:
-            # Keychain asked for explicitly: never reuse a plaintext copy left
-            # from an earlier `file` setting, and remove it.
-            _path_for(key).unlink(missing_ok=True)
             return None
         # Fall through to file cache — covers both "keyring unavailable"
         # and "nothing found under this key in the keychain yet".
