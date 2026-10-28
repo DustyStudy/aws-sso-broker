@@ -44,6 +44,10 @@ def _creds_to_env(creds: dict, region: str) -> dict:
     # Never inherit a long-lived profile/key from the parent shell by accident.
     for name in _STRIP_ENV:
         env.pop(name, None)
+    if "Expiration" in creds:  # epoch ms; lets SDKs and Terraform see when these expire
+        env["AWS_CREDENTIAL_EXPIRATION"] = time.strftime(
+            "%Y-%m-%dT%H:%M:%SZ", time.gmtime(creds["Expiration"] / 1000)
+        )
     return env
 
 

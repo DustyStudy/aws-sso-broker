@@ -91,8 +91,10 @@ def _managed_profiles_for(
                 )
             owners[name] = owner
             profiles[name] = {
+                # The account ID, not the alias: under a different registry
+                # (SSOBROKER_CONFIG) the same alias can name another account.
                 "credential_process": (
-                    f"ssobroker creds-process --account {account.alias} --role {role}"
+                    f"ssobroker creds-process --account {account.account_id} --role {role}"
                 ),
                 "region": cfg.default_region,
             }

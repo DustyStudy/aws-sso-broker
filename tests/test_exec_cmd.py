@@ -201,6 +201,7 @@ def test_credentials_placed_in_child_env_and_profile_stripped(
     cfg, fake_get_creds, fake_subprocess, monkeypatch
 ):
     monkeypatch.setenv("AWS_PROFILE", "some-other-profile")
+    monkeypatch.setenv("AWS_CREDENTIAL_EXPIRATION", "2000-01-01T00:00:00Z")
 
     exec_cmd.run(
         cfg,
@@ -219,6 +220,8 @@ def test_credentials_placed_in_child_env_and_profile_stripped(
     # A long-lived profile from the parent shell must never leak into a
     # child process that's supposed to be running under short-lived SSO creds.
     assert "AWS_PROFILE" not in env
+    # The parent's expiry is replaced with these credentials' own.
+    assert env["AWS_CREDENTIAL_EXPIRATION"] == "2286-11-20T17:46:39Z"
 
 
 def test_exit_code_from_child_process_is_propagated(cfg, fake_get_creds, monkeypatch):
@@ -362,7 +365,8 @@ def test_other_ambient_credential_sources_are_stripped(
     )
 
     ((_, env),) = fake_subprocess
-    assert not any(name in env for name in exec_cmd._STRIP_ENV)
+    # Gone, or (AWS_CREDENTIAL_EXPIRATION) replaced with the new credentials' value.
+    assert not any(env.get(name) == "from-parent" for name in exec_cmd._STRIP_ENV)
 
 
 def test_exec_audit_entry_carries_access_key_id(cfg, fake_get_creds, fake_subprocess, tmp_path):

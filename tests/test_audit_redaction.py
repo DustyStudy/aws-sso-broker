@@ -33,6 +33,24 @@ def _home(tmp_path, monkeypatch):
             ["aws", "s3api", "get-object", "--key", "x"],
         ),
         (["tool", "--token"], ["tool", "--token"]),
+        (
+            ["curl", "-H", "Authorization: Bearer abc", "https://x"],
+            ["curl", "-H", f"Authorization: {R}", "https://x"],
+        ),
+        (["curl", "-Hcookie:sid=abc"], ["curl", f"-Hcookie:{R}"]),
+        (
+            [
+                "aws",
+                "secretsmanager",
+                "put-secret-value",
+                "--cli-input-json",
+                '{"SecretString":"x"}',
+            ],
+            ["aws", "secretsmanager", "put-secret-value", "--cli-input-json", R],
+        ),
+        (["curl", "-d", '{"password": "x"}'], ["curl", "-d", R]),
+        (["tool", '--body={"api_key": "x"}'], ["tool", f"--body={R}"]),
+        (["curl", "-d", '{"name": "x"}'], ["curl", "-d", '{"name": "x"}']),
     ],
 )
 def test_redact_command(command, expected):

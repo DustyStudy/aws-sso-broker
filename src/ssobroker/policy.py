@@ -14,8 +14,9 @@ planted by an attacker can at worst lock the user out, not redirect them.
 
 The one setting that sends data somewhere is `audit_forward` with CloudWatch.
 On POSIX the file (and its directory) must be owned by root and not writable
-by group/other, or it is rejected. On Windows, deploy the folder with an ACL
-that only Administrators/SYSTEM can write (see docs/HARDENING.md).
+by group/other, or it is rejected. On Windows the file and folder must be owned
+by, and only writable by, Administrators/SYSTEM (see docs/HARDENING.md), or it
+is rejected.
 
 No environment variable can point ssobroker at a different policy file —
 that would defeat the point of it.
@@ -112,8 +113,67 @@ def normalize_start_url(url: str) -> str:
     return re.sub(r"[\s/]+$", "", url.strip()).lower()
 
 
+# Principals allowed to own or write the Windows policy: SYSTEM, Administrators, TrustedInstaller.
+_WIN_TRUSTED_SIDS = {
+    "SY",
+    "BA",
+    "S-1-5-18",
+    "S-1-5-32-544",
+    "S-1-5-80-956008885-3418522649-1831038044-1853292631-2271478464",
+}
+# SDDL rights that let a principal change, replace or delete the policy file or folder.
+_SDDL_RIGHT_BITS = {
+    "GA": 0x10000000,
+    "GW": 0x40000000,
+    "FA": 0x1F01FF,
+    "FW": 0x120116,
+    "SD": 0x10000,
+    "WD": 0x40000,
+    "WO": 0x80000,
+    "DC": 0x2,
+    "LC": 0x4,
+    "DT": 0x40,
+}
+# write/add file, append/add subfolder, delete child, DELETE, WRITE_DAC, WRITE_OWNER, generic.
+_WIN_WRITE_MASK = 0x2 | 0x4 | 0x40 | 0x10000 | 0x40000 | 0x80000 | 0x10000000 | 0x40000000
+
+
+def _sddl_rights(rights: str) -> int:
+    if rights.lower().startswith("0x"):
+        return int(rights, 16)
+    return sum(_SDDL_RIGHT_BITS.get(rights[i : i + 2], 0) for i in range(0, len(rights), 2))
+
+
+def untrusted_writers(sddl: str) -> list[str]:
+    """Principals other than SYSTEM/Administrators/TrustedInstaller that own,
+    or are allowed to write, the object `sddl` (with O: and D: parts) describes."""
+    found = []
+    owner = re.match(r"O:(S-[\d-]+|[A-Z]{2})", sddl)
+    if not owner or owner.group(1) not in _WIN_TRUSTED_SIDS:
+        found.append(f"owner {owner.group(1) if owner else '?'}")
+    for ace in re.findall(r"\(([^)]*)\)", sddl):
+        kind, flags, rights, *_rest, sid = ace.split(";")
+        # Deny ACEs grant nothing and inherit-only ACEs don't apply here. Any
+        # other kind is counted, so an ACE this can't parse fails closed.
+        if kind in ("D", "OD", "XD") or "IO" in flags or sid in _WIN_TRUSTED_SIDS:
+            continue
+        if _sddl_rights(rights) & _WIN_WRITE_MASK:
+            found.append(sid)
+    return found
+
+
 def _check_trusted(path: Path) -> None:
-    """POSIX only: refuse a policy file a non-root user could have written."""
+    """Refuse a policy file a non-admin user could have written."""
+    if sys.platform == "win32":
+        from .cache import _dacl_sddl
+
+        for p in (path, path.parent):
+            if bad := untrusted_writers(_dacl_sddl(p, owner=True)):
+                raise PolicyError(
+                    f"Refusing managed policy: {p} can be changed by {', '.join(bad)}. "
+                    "See docs/HARDENING.md for the ACL to set."
+                )
+        return
     if os.name != "posix":
         return
     for p in (path, path.parent):

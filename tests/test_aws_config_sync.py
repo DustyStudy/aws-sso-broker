@@ -39,7 +39,8 @@ def test_writes_new_profile_from_scratch(tmp_path):
     parser = configparser.ConfigParser()
     parser.read(path)
     assert parser.get("profile prod", "credential_process") == (
-        "ssobroker creds-process --account prod --role read-only"
+        # The account ID, so a second registry reusing the alias "prod" can't redirect it.
+        "ssobroker creds-process --account 111111111111 --role read-only"
     )
 
 
@@ -111,7 +112,9 @@ def test_prefix_keeps_one_profile_per_account():
     assert sorted(written) == ["sso-a", "sso-b", "sso-c"]
     parser = configparser.ConfigParser()
     parser.read(path)
-    assert parser.get("profile sso-b", "credential_process").endswith("--account b --role ro")
+    assert parser.get("profile sso-b", "credential_process").endswith(
+        "--account 222222222222 --role ro"
+    )
 
 
 def test_prefix_with_all_roles_keeps_one_profile_per_account_and_role():

@@ -197,3 +197,17 @@ def test_load_rejects_bad_account_id_or_role_name(tmp_path, account):
     )
     with pytest.raises(config.ConfigError):
         config.load(p)
+
+
+def test_id_shaped_alias_must_match_its_account_id(tmp_path):
+    # Aliases resolve before IDs, so this would send "--account 222222222222" to another account.
+    head = "name: t\nsso_start_url: https://example.awsapps.com/start\nsso_region: us-east-1\n"
+    bad = write_orgs_yaml(
+        tmp_path, head + "accounts:\n  '222222222222':\n    account_id: '111111111111'\n"
+    )
+    with pytest.raises(config.ConfigError, match="looks like an account ID"):
+        config.load(bad)
+    ok = write_orgs_yaml(
+        tmp_path, head + "accounts:\n  '111111111111':\n    account_id: '111111111111'\n"
+    )
+    assert config.resolve_account(config.load(ok), "111111111111").account_id == "111111111111"

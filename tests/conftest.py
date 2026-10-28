@@ -5,7 +5,7 @@ from __future__ import annotations
 
 import pytest
 
-from ssobroker import audit, exposure, policy
+from ssobroker import audit, cache, exposure, policy
 
 
 @pytest.fixture(autouse=True)
@@ -17,6 +17,8 @@ def _no_managed_policy(tmp_path, monkeypatch):
     monkeypatch.setattr(exposure, "_aws_dir", lambda: tmp_path / "aws-home")
     monkeypatch.delenv("AWS_SHARED_CREDENTIALS_FILE", raising=False)
     monkeypatch.delenv("AWS_CONFIG_FILE", raising=False)
+    # Never read or write the developer's real OS keychain; tests that need one stub it.
+    monkeypatch.setattr(cache, "_keyring_module", lambda: None)
     yield
     policy.load.cache_clear()
     audit.configure(audit.AuditSettings())
