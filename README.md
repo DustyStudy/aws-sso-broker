@@ -198,14 +198,17 @@ None of these replace IAM, SCPs or CloudTrail; see the security model above.
 
 ## Proof
 
-Run for real against a real IAM Identity Center instance, twice, and
+Run for real against a real IAM Identity Center instance, three times, and
 verified against AWS's own responses. The first run covered credentials,
 guardrails, audit logging, `sync-aws-config` and logout, and found nothing.
 The second covered the sign-in and audit hardening: PKCE sign-in, server-side logout
 (the old token is rejected by AWS afterwards), the managed policy, redaction,
 CloudWatch forwarding, and finding the audit log's `access_key_id` in
 CloudTrail. It found that users would have had to sign in every hour, which
-was fixed before release. See [`docs/PROOF.md`](docs/PROOF.md).
+was fixed before release. The third ran the published v0.2.8 release on a
+real Windows machine: OS keychain storage, and a machine policy that is
+accepted with the documented ACL and refused when standard users can change
+it. See [`docs/PROOF.md`](docs/PROOF.md).
 
 ## Development
 
