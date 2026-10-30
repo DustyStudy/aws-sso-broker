@@ -89,6 +89,14 @@ provenance for all of it, uploads the files and the attestation bundle to
 the draft, and publishes it. If the build fails, the release stays a draft:
 re-run the `build` job.
 
+release-please opens the release PR with a GitHub App token rather than
+`GITHUB_TOKEN`, so CI runs on the release PR like on any other. The app has
+only Contents and Pull requests (read and write) and is installed on this
+repository alone. Its client ID is the repository variable
+`RELEASE_APP_CLIENT_ID` and its private key the secret
+`RELEASE_APP_PRIVATE_KEY`. To rotate the key, generate a new one in the app's
+settings, replace the secret, then delete the old key.
+
 Publishing to PyPI is off until trusted publishing is set up (no API token is
 stored anywhere):
 
