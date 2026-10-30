@@ -17,10 +17,10 @@ jobs:
     timeout-minutes: 10
     # release-please opens/updates the release PR and, on merge, creates the
     # tag and a draft GitHub release (see release-please-config.json). The
-    # build job publishes it. Write access is scoped to this job only.
-    permissions:
-      contents: write
-      pull-requests: write
+    # build job publishes it. It writes with a short-lived GitHub App token,
+    # not GITHUB_TOKEN: a pull request opened by GITHUB_TOKEN does not start
+    # CI on its own, so the release PR would wait for a manual approval.
+    permissions: {}
     outputs:
       release_created: ${{ steps.release.outputs.release_created }}
       tag_name: ${{ steps.release.outputs.tag_name }}
@@ -33,9 +33,21 @@ jobs:
             github.com:443
             api.github.com:443
 
+      # The app is installed on this repository only, and the token is cut down
+      # to the two permissions release-please uses. It expires within an hour
+      # and is revoked when the job ends.
+      - uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
+        id: app-token
+        with:
+          client-id: ${{ vars.RELEASE_APP_CLIENT_ID }}
+          private-key: ${{ secrets.RELEASE_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
         id: release
         with:
+          token: ${{ steps.app-token.outputs.token }}
           config-file: release-please-config.json
           manifest-file: .release-please-manifest.json
 
