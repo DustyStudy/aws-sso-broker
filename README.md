@@ -121,6 +121,22 @@ Installing from source, the OS keychain extra, shell completion and
 upgrading from `orgctl` are covered in
 [docs/USAGE.md](docs/USAGE.md#install-options).
 
+### Windows with Smart App Control
+
+pipx and `uv tool install` create an unsigned `ssobroker.exe` launcher, which
+Smart App Control (or another Application Control policy) blocks with "An
+Application Control policy has blocked this file". The package itself still
+runs through the Python in the environment it was installed into. Add a
+function like this to your PowerShell `$PROFILE`:
+
+```powershell
+# uv tool install; for pipx use "$(pipx environment --value PIPX_LOCAL_VENVS)\aws-sso-broker"
+function ssobroker { & "$(uv tool dir)\aws-sso-broker\Scripts\python.exe" -m ssobroker @args }
+```
+
+The function bypasses the launcher, so it keeps working after an upgrade
+creates a new one.
+
 ## Quick start
 
 ```bash
