@@ -50,3 +50,36 @@ def test_version_comes_from_package_metadata():
     from importlib.metadata import version
 
     assert ssobroker.__version__ == version("aws-sso-broker")
+
+
+def test_managed_policy_network_settings_win_over_environment_and_config(monkeypatch, tmp_path):
+    from conftest import write_policy
+
+    write_policy(
+        monkeypatch,
+        tmp_path,
+        "use_fips_endpoint: true\nca_bundle: /etc/corp-ca.pem\nhttps_proxy: http://corp:8080\n",
+    )
+    monkeypatch.setenv("HTTPS_PROXY", "http://mine:3128")
+    monkeypatch.setenv("AWS_USE_FIPS_ENDPOINT", "false")
+    monkeypatch.delenv("AWS_CA_BUNDLE", raising=False)
+    network.apply(_cfg(ca_bundle="/home/me/ca.pem", use_fips_endpoint=False))
+    import os
+
+    assert os.environ["HTTPS_PROXY"] == "http://corp:8080"
+    assert os.environ["AWS_USE_FIPS_ENDPOINT"] == "true"
+    assert os.environ["AWS_CA_BUNDLE"] == "/etc/corp-ca.pem"
+
+
+def test_policy_proxy_cannot_be_bypassed_with_no_proxy_or_lowercase(monkeypatch, tmp_path):
+    from botocore.utils import get_environ_proxies
+    from conftest import write_policy
+
+    write_policy(monkeypatch, tmp_path, "https_proxy: http://corp:8080\n")
+    monkeypatch.delenv("HTTPS_PROXY", raising=False)  # restored after the test
+    monkeypatch.setenv("NO_PROXY", "*")
+    monkeypatch.setenv("https_proxy", "http://mine:3128")
+    network.apply(_cfg())
+
+    proxies = get_environ_proxies("https://oidc.us-east-1.amazonaws.com")
+    assert proxies.get("https") == "http://corp:8080"

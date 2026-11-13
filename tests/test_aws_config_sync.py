@@ -29,7 +29,7 @@ def _fake_home(tmp_path, monkeypatch):
 
 def test_writes_new_profile_from_scratch(tmp_path):
     cfg = _cfg(prod=Account(alias="prod", account_id="111111111111", roles=["read-only"]))
-    written, skipped, conflicts, path, _backup = aws_config_sync.sync(cfg)
+    written, skipped, conflicts, path, _backup, _ = aws_config_sync.sync(cfg)
 
     assert written == ["prod"]
     assert skipped == []
@@ -50,7 +50,7 @@ def test_rerun_overwrites_its_own_previously_written_section(tmp_path):
 
     # Change the registry (e.g. a different role) and sync again.
     cfg2 = _cfg(prod=Account(alias="prod", account_id="111111111111", roles=["admin"]))
-    written, skipped, conflicts, path, _backup = aws_config_sync.sync(cfg2)
+    written, skipped, conflicts, path, _backup, _ = aws_config_sync.sync(cfg2)
 
     assert written == ["prod"]
     assert conflicts == []
@@ -67,7 +67,7 @@ def test_preexisting_unmanaged_profile_is_left_untouched(tmp_path):
     path.write_text("[profile prod]\naws_access_key_id = AKIAEXAMPLE\nregion = us-west-2\n")
 
     cfg = _cfg(prod=Account(alias="prod", account_id="111111111111", roles=["read-only"]))
-    written, skipped, conflicts, returned_path, backup = aws_config_sync.sync(cfg)
+    written, skipped, conflicts, returned_path, backup, _ = aws_config_sync.sync(cfg)
 
     assert written == []
     assert conflicts == ["prod"]
@@ -82,7 +82,7 @@ def test_preexisting_unmanaged_profile_is_left_untouched(tmp_path):
 
 def test_dry_run_writes_nothing(tmp_path):
     cfg = _cfg(prod=Account(alias="prod", account_id="111111111111", roles=["read-only"]))
-    written, skipped, conflicts, path, _backup = aws_config_sync.sync(cfg, dry_run=True)
+    written, skipped, conflicts, path, _backup, _ = aws_config_sync.sync(cfg, dry_run=True)
 
     assert written == ["prod"]
     assert not path.exists()
@@ -90,7 +90,7 @@ def test_dry_run_writes_nothing(tmp_path):
 
 def test_skips_account_with_multiple_roles_and_no_default(tmp_path):
     cfg = _cfg(prod=Account(alias="prod", account_id="111111111111", roles=["read-only", "admin"]))
-    written, skipped, conflicts, path, _backup = aws_config_sync.sync(cfg)
+    written, skipped, conflicts, path, _backup, _ = aws_config_sync.sync(cfg)
 
     assert written == []
     assert skipped == ["prod"]
@@ -107,7 +107,7 @@ def _three_accounts() -> OrgConfig:
 def test_prefix_keeps_one_profile_per_account():
     # Regression: with --prefix, every account collapsed into a profile named
     # exactly <prefix>, so only the last account survived.
-    written, _, _, path, _ = aws_config_sync.sync(_three_accounts(), prefix="sso")
+    written, _, _, path, _, _ = aws_config_sync.sync(_three_accounts(), prefix="sso")
 
     assert sorted(written) == ["sso-a", "sso-b", "sso-c"]
     parser = configparser.ConfigParser()
@@ -125,7 +125,7 @@ def test_prefix_that_could_inject_config_lines_is_refused(prefix):
 
 
 def test_prefix_with_all_roles_keeps_one_profile_per_account_and_role():
-    written, _, _, _, _ = aws_config_sync.sync(_three_accounts(), prefix="sso", all_roles=True)
+    written, _, _, _, _, _ = aws_config_sync.sync(_three_accounts(), prefix="sso", all_roles=True)
     assert sorted(written) == ["sso-a-ro", "sso-b-ro", "sso-c-admin", "sso-c-ro"]
 
 
@@ -204,7 +204,7 @@ def test_rerun_with_no_changes_writes_nothing_and_makes_no_backup(tmp_path):
     after_first = _read(path)
     backups_after_first = _backups(path)
 
-    _, _, _, _, backup = aws_config_sync.sync(cfg)
+    _, _, _, _, backup, _ = aws_config_sync.sync(cfg)
 
     assert backup is None
     assert _read(path) == after_first
@@ -218,8 +218,8 @@ def test_backups_are_never_overwritten_so_the_original_survives(tmp_path):
     cfg1 = _cfg(prod=Account(alias="prod", account_id="111111111111", roles=["ro"]))
     cfg2 = _cfg(prod=Account(alias="prod", account_id="111111111111", roles=["admin"]))
 
-    _, _, _, _, first_backup = aws_config_sync.sync(cfg1)
-    _, _, _, _, second_backup = aws_config_sync.sync(cfg2)
+    _, _, _, _, first_backup, _ = aws_config_sync.sync(cfg1)
+    _, _, _, _, second_backup, _ = aws_config_sync.sync(cfg2)
 
     assert first_backup is not None and second_backup is not None
     assert first_backup != second_backup
@@ -230,7 +230,7 @@ def test_backups_are_never_overwritten_so_the_original_survives(tmp_path):
 
 def test_no_backup_when_config_file_did_not_exist_yet():
     cfg = _cfg(prod=Account(alias="prod", account_id="111111111111", roles=["ro"]))
-    _, _, _, path, backup = aws_config_sync.sync(cfg)
+    _, _, _, path, backup, _ = aws_config_sync.sync(cfg)
     assert backup is None
     assert _backups(path) == []
 
@@ -239,7 +239,7 @@ def test_dry_run_makes_no_backup_and_leaves_file_alone(tmp_path):
     path = _write_aws_config(tmp_path, ORIGINAL_CONFIG)
     cfg = _cfg(prod=Account(alias="prod", account_id="111111111111", roles=["ro"]))
 
-    _, _, _, _, backup = aws_config_sync.sync(cfg, dry_run=True)
+    _, _, _, _, backup, _ = aws_config_sync.sync(cfg, dry_run=True)
 
     assert backup is None
     assert _read(path) == ORIGINAL_CONFIG
@@ -271,7 +271,7 @@ def test_section_written_by_older_configparser_version_is_still_recognised(tmp_p
     path = _write_aws_config(tmp_path, legacy)
     cfg = _cfg(prod=Account(alias="prod", account_id="111111111111", roles=["new"]))
 
-    written, _, conflicts, _, _ = aws_config_sync.sync(cfg)
+    written, _, conflicts, _, _, _ = aws_config_sync.sync(cfg)
 
     assert written == ["prod"]
     assert conflicts == []
@@ -293,7 +293,7 @@ def test_section_written_under_the_old_orgctl_name_is_taken_over(tmp_path):
     path = _write_aws_config(tmp_path, legacy)
     cfg = _cfg(prod=Account(alias="prod", account_id="111111111111", roles=["ro"]))
 
-    written, _, conflicts, _, _ = aws_config_sync.sync(cfg)
+    written, _, conflicts, _, _, _ = aws_config_sync.sync(cfg)
 
     updated = _read(path)
     assert written == ["prod"]
@@ -359,3 +359,57 @@ def test_equivalent_managed_sections_collapse_into_one(monkeypatch, tmp_path):
     parser = configparser.ConfigParser()
     parser.read(target)  # raises DuplicateSectionError if two remain
     assert parser.sections() == ["profile prod"]
+
+
+def test_prune_removes_only_profiles_ssobroker_wrote_that_are_no_longer_wanted():
+    aws_config_sync.sync(_three_accounts())
+    path = aws_config_sync.aws_config_path()
+    path.write_text(path.read_text() + "\n[profile mine]\nregion = eu-west-1\n")
+    smaller = _cfg(a=_three_accounts().accounts["a"])
+
+    kept = aws_config_sync.sync(smaller)  # without --prune nothing is removed
+    assert kept.pruned == []
+    result = aws_config_sync.sync(smaller, prune=True)
+
+    assert sorted(result.pruned) == ["b", "c"]
+    parser = configparser.ConfigParser()
+    parser.read(path)
+    assert parser.sections() == ["profile a", "profile mine"]
+
+
+def test_prune_dry_run_reports_but_writes_nothing():
+    aws_config_sync.sync(_three_accounts())
+    before = aws_config_sync.aws_config_path().read_text()
+    smaller = _cfg(a=_three_accounts().accounts["a"])
+    result = aws_config_sync.sync(smaller, prune=True, dry_run=True)
+    assert sorted(result.pruned) == ["b", "c"]
+    assert aws_config_sync.aws_config_path().read_text() == before
+
+
+def test_python_launcher_profile_runs_this_interpreter():
+    import os
+    import sys
+
+    aws_config_sync.sync(_three_accounts(), launcher=aws_config_sync.python_launcher())
+    parser = configparser.ConfigParser()
+    parser.read(aws_config_sync.aws_config_path())
+    # Split the way botocore does on this platform.
+    from botocore.compat import compat_shell_split
+
+    argv = compat_shell_split(parser.get("profile a", "credential_process"))
+    assert argv[1:3] == ["-m", "ssobroker"]
+    assert os.path.samefile(argv[0], sys.executable)
+    assert argv[3:] == ["creds-process", "--account", "111111111111", "--role", "ro"]
+
+
+@pytest.mark.parametrize(
+    ("exe", "expected"),
+    [
+        ("/usr/bin/python3", "/usr/bin/python3 -m ssobroker"),
+        ("/opt/my tools/python3", '"/opt/my tools/python3" -m ssobroker'),
+    ],
+)
+def test_python_launcher_quotes_only_a_path_with_spaces(monkeypatch, exe, expected):
+    # The Go SDK on Windows can't run a quoted command, so quote only when needed.
+    monkeypatch.setattr(aws_config_sync.sys, "platform", "linux")
+    assert aws_config_sync.python_launcher(exe) == expected

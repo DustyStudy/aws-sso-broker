@@ -27,9 +27,11 @@ import sys
 import time
 from collections.abc import Callable, Iterator
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import TYPE_CHECKING
 
+from .cache import file_lock
 from .paths import home_dir
 
 if TYPE_CHECKING:
@@ -183,10 +185,36 @@ def record(
         "reason": reason,
         "access_key_id": access_key_id,
     }
-    with log_path().open("a", encoding="utf-8") as f:
-        f.write(json.dumps(entry) + "\n")
+    path = log_path()
+    # One writer at a time, so a rotation can't take a line another process is
+    # appending before the cursor check has counted it.
+    with file_lock(path.with_name(".audit.lock")):
+        _rotate_if_large(path)
+        with path.open("a", encoding="utf-8") as f:
+            f.write(json.dumps(entry) + "\n")
     _forward(entry)
     return entry
+
+
+# Past this size the log is renamed to audit.log.<UTC timestamp> and a new one
+# started, so reading and forwarding it stays cheap. Rotated files are kept.
+_MAX_LOG_BYTES = 10 * 1024 * 1024
+
+
+def _rotate_if_large(path: Path) -> None:
+    try:
+        if path.stat().st_size < _MAX_LOG_BYTES:
+            return
+        if "cloudwatch" in _settings.forward:
+            sent = path.read_text(encoding="utf-8").count("\n")
+            if _read_cursor(sent) < sent:
+                return  # entries not yet in CloudWatch: rotate after a push sends them
+        stamp = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        # A unique name, so two processes rotating at once never overwrite each other.
+        os.replace(path, path.with_name(f"{path.name}.{stamp}.{os.getpid()}"))
+        _cursor_path().unlink(missing_ok=True)
+    except OSError:
+        pass  # already rotated by another process, or held open on Windows: next time
 
 
 def _warn(msg: str) -> None:

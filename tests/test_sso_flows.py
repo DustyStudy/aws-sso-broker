@@ -582,3 +582,26 @@ def test_revoked_refresh_token_falls_back_to_sign_in(monkeypatch):
     _cache_refreshable(issued_ago=2 * 3600, access_left=-10)
     key = sso._token_cache_key(START_URL, REGION)
     assert sso._usable_token(cache.get(key), key, START_URL, REGION, 8) is None
+
+
+def test_sso_clients_never_resolve_aws_credentials(monkeypatch, tmp_path):
+    # With AWS_PROFILE naming a creds-process profile, resolving credentials for
+    # the SSO client would run ssobroker inside itself. Prove no lookup happens
+    # with a real boto3 client and a credential_process that leaves a marker.
+    import sys
+
+    marker = tmp_path / "ran"
+    script = tmp_path / "provider.py"
+    script.write_text(f"open({str(marker)!r}, 'w').close()\n")
+    config_file = tmp_path / "config"
+    config_file.write_text(f'[profile loop]\ncredential_process = "{sys.executable}" "{script}"\n')
+    monkeypatch.setenv("AWS_CONFIG_FILE", str(config_file))
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "none"))
+    monkeypatch.setenv("AWS_PROFILE", "loop")
+    for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"):
+        monkeypatch.delenv(name, raising=False)
+
+    sso._client("sso", REGION)
+    sso._client("sso-oidc", REGION)
+
+    assert not marker.exists()

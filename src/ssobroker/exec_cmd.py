@@ -12,9 +12,12 @@ import shutil
 import signal
 import subprocess
 import sys
+import tempfile
 import time
+from pathlib import Path
 
 from . import audit, guardrails
+from .aws_config_sync import python_launcher
 from .config import Account, OrgConfig, resolve_account, resolve_role
 from .sso import SsoToken, fetch_role_credentials, get_role_credentials
 
@@ -207,6 +210,7 @@ def spawn_shell(
     *,
     gcfg: guardrails.GuardrailConfig | None = None,
     reason: str | None = None,
+    refresh: bool = False,
 ) -> int:
     account = resolve_account(cfg, account_alias_or_id)
     resolved_role = resolve_role(account, role)
@@ -245,18 +249,52 @@ def spawn_shell(
         access_key_id=creds["AccessKeyId"],
     )
 
-    minutes_left = (creds["Expiration"] / 1000.0 - time.time()) / 60.0
     print(f"Spawning subshell as {prompt_tag} — type 'exit' to return.")
+    if refresh:
+        with tempfile.TemporaryDirectory(prefix="ssobroker-shell-") as tmp:
+            _use_refreshing_profile(env, Path(tmp), account.account_id, resolved_role)
+            print(
+                "Credentials refresh automatically for tools that read AWS profiles "
+                "(AWS CLI, SDKs, Terraform).",
+                file=sys.stderr,
+            )
+            return _run_child([shell], env)  # the user's own shell, by design
+
+    minutes_left = (creds["Expiration"] / 1000.0 - time.time()) / 60.0
     print(f"Credentials expire in ~{minutes_left:.0f} min.", file=sys.stderr)
     if minutes_left < 15:
         print(
             "WARNING: these credentials expire soon. A long session may outlive "
             "them — if AWS calls start failing with an expired-token error, exit "
-            "and run `ssobroker shell` again to get a fresh set.",
+            "and run `ssobroker shell` again to get a fresh set, or use --refresh.",
             file=sys.stderr,
         )
 
     return _run_child([shell], env)  # the user's own shell, by design
+
+
+_REFRESH_PROFILE = "ssobroker-shell"
+
+
+def _use_refreshing_profile(env: dict, tmp: Path, account_id: str, role: str) -> None:
+    """Point `env` at a one-profile AWS config in `tmp` whose credential_process
+    is `ssobroker creds-process`, instead of fixed keys. SDKs call it again as
+    the credentials near expiry, so a long shell keeps working. Holds no secret."""
+    config_file = tmp / "config"
+    config_file.write_text(
+        f"[profile {_REFRESH_PROFILE}]\n"
+        f"credential_process = {python_launcher()} creds-process "
+        f"--account {account_id} --role {role}\n"
+        f"region = {env['AWS_REGION']}\n",
+        encoding="utf-8",
+    )
+    for name in ("AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY", "AWS_SESSION_TOKEN"):
+        env.pop(name)  # environment keys would win over the profile and never refresh
+    env.pop("AWS_CREDENTIAL_EXPIRATION", None)
+    env["AWS_CONFIG_FILE"] = str(config_file)
+    # A same-named profile with fixed keys in ~/.aws/credentials would win too.
+    env["AWS_SHARED_CREDENTIALS_FILE"] = str(tmp / "credentials")
+    env["AWS_PROFILE"] = _REFRESH_PROFILE
 
 
 def export_env_lines(
@@ -290,16 +328,33 @@ def export_env_lines(
         access_key_id=creds["AccessKeyId"],
     )
 
+    # The same environment `exec` gives its child: drop what could mix in another
+    # profile or role, and say when these credentials expire.
+    env = _creds_to_env(creds, resolved_region)
+    unset = [name for name in _STRIP_ENV if name not in env]
     pairs = [
-        ("AWS_ACCESS_KEY_ID", creds["AccessKeyId"]),
-        ("AWS_SECRET_ACCESS_KEY", creds["SecretAccessKey"]),
-        ("AWS_SESSION_TOKEN", creds["SessionToken"]),
-        ("AWS_DEFAULT_REGION", resolved_region),
-        ("AWS_REGION", resolved_region),
+        (name, env[name])
+        for name in (
+            "AWS_ACCESS_KEY_ID",
+            "AWS_SECRET_ACCESS_KEY",
+            "AWS_SESSION_TOKEN",
+            "AWS_DEFAULT_REGION",
+            "AWS_REGION",
+            "AWS_CREDENTIAL_EXPIRATION",
+        )
+        if name in env
     ]
     if powershell:
-        return "\n".join(f"$env:{k} = {_powershell_quote(v)}" for k, v in pairs)
-    return "\n".join(f"export {k}={shlex.quote(v)}" for k, v in pairs)
+        paths = ", ".join(f"Env:{name}" for name in unset)
+        return "\n".join(
+            [
+                f"Remove-Item -Path {paths} -ErrorAction SilentlyContinue",
+                *(f"$env:{k} = {_powershell_quote(v)}" for k, v in pairs),
+            ]
+        )
+    return "\n".join(
+        [f"unset {' '.join(unset)}", *(f"export {k}={shlex.quote(v)}" for k, v in pairs)]
+    )
 
 
 def _powershell_quote(value: str) -> str:

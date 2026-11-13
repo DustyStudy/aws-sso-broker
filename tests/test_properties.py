@@ -107,9 +107,11 @@ def _export_lines(value: str, powershell: bool) -> str:
 def test_posix_export_line_parses_back_to_the_exact_value(value):
     """`eval "$(ssobroker export-env ...)"` must assign exactly the value
     and nothing else, whatever characters it contains."""
-    words = shlex.split(_export_lines(value, powershell=False))
-    # Five `export NAME=value` statements, and the token comes back intact.
-    assert words[0::2] == ["export"] * 5
+    first, rest = _export_lines(value, powershell=False).split("\n", 1)
+    assert first.startswith("unset AWS_PROFILE ")
+    words = shlex.split(rest)
+    # Six `export NAME=value` statements, and the token comes back intact.
+    assert words[0::2] == ["export"] * 6
     assert f"AWS_SESSION_TOKEN={value}" in words[1::2]
 
 

@@ -16,6 +16,7 @@ import os
 import re
 import shlex
 import shutil
+import sys
 import tempfile
 import time
 from pathlib import Path
@@ -43,6 +44,38 @@ class SyncResult(NamedTuple):
     conflicts: list[str]
     path: Path
     backup: Path | None
+    pruned: list[str]
+
+
+def python_launcher(executable: str | None = None) -> str:
+    """`ssobroker` run through this Python, for machines where the ssobroker
+    launcher is blocked (Smart App Control) or not on PATH.
+
+    Left unquoted when possible: on Windows the Go SDK (Terraform) runs
+    credential_process through `cmd.exe /C` with Go's argument escaping, which
+    turns quotes into \\" that cmd.exe can't parse. A Windows path with spaces
+    is shortened to its 8.3 form first; only if that still has spaces is it
+    quoted, which the AWS CLI and boto3 accept but the Go SDK on Windows doesn't."""
+    exe = executable or sys.executable
+    if sys.platform == "win32" and _has_space(exe):
+        exe = _short_path(exe)
+    return f'"{exe}" -m ssobroker' if _has_space(exe) else f"{exe} -m ssobroker"
+
+
+def _has_space(text: str) -> bool:
+    return any(ch.isspace() for ch in text)
+
+
+def _short_path(path: str) -> str:
+    """The 8.3 short form of a Windows path, or the path unchanged if the
+    volume has short names turned off."""
+    if sys.platform != "win32":  # also tells mypy the rest is Windows-only
+        return path
+    import ctypes
+
+    buf = ctypes.create_unicode_buffer(32768)
+    n = ctypes.windll.kernel32.GetShortPathNameW(path, buf, len(buf))
+    return buf.value if 0 < n < len(buf) else path
 
 
 def aws_config_path() -> Path:
@@ -57,7 +90,7 @@ def _profile_name(prefix: str, account: Account, role: str, *, all_roles: bool) 
 
 
 def _managed_profiles_for(
-    cfg: OrgConfig, prefix: str, all_roles: bool
+    cfg: OrgConfig, prefix: str, all_roles: bool, launcher: str = "ssobroker"
 ) -> tuple[dict[str, dict[str, str]], list[str]]:
     """Build the set of profile-name -> settings this tool would write.
 
@@ -94,7 +127,7 @@ def _managed_profiles_for(
                 # The account ID, not the alias: under a different registry
                 # (SSOBROKER_CONFIG) the same alias can name another account.
                 "credential_process": (
-                    f"ssobroker creds-process --account {account.account_id} --role {role}"
+                    f"{launcher} creds-process --account {account.account_id} --role {role}"
                 ),
                 "region": cfg.default_region,
             }
@@ -174,12 +207,18 @@ def sync(
     prefix: str = "",
     all_roles: bool = False,
     dry_run: bool = False,
+    prune: bool = False,
+    launcher: str = "ssobroker",
 ) -> SyncResult:
     """Write/update profiles in ~/.aws/config for every account/role.
 
     Returns a SyncResult: profile names written, skipped account aliases,
-    conflicting profile names, the config path, and the path of the backup
-    made (None if nothing was backed up).
+    conflicting profile names, the config path, the path of the backup
+    made (None if nothing was backed up), and profiles pruned.
+
+    `prune` removes every profile this tool wrote earlier that this run would
+    not write (an account dropped from the registry, a different --prefix).
+    `launcher` is the command that starts ssobroker in credential_process.
 
     A profile name is a "conflict" (and left completely untouched) when a
     section of that name already exists in ~/.aws/config but doesn't carry
@@ -194,7 +233,7 @@ def sync(
         # Profile names go into "[profile ...]" headers: a "]" or newline would inject lines.
         _name(prefix, "--prefix")
     path = aws_config_path()
-    desired, skipped = _managed_profiles_for(cfg, prefix, all_roles)
+    desired, skipped = _managed_profiles_for(cfg, prefix, all_roles, launcher)
 
     original = ""
     if path.exists():
@@ -224,6 +263,14 @@ def sync(
             new_blocks.append(block)
         written.append(name)
 
+    pruned: list[str] = []
+    if prune:
+        for section in sections:
+            profile = _profile_id(section.name)
+            if profile and profile not in desired and section.managed:
+                section.lines = _trailing_gap(section.lines)
+                pruned.append(profile)
+
     out = list(preamble)
     for section in sections:
         out.extend(section.lines)
@@ -252,4 +299,4 @@ def sync(
             os.unlink(tmp)
             raise
 
-    return SyncResult(written, skipped, conflicts, path, backup)
+    return SyncResult(written, skipped, conflicts, path, backup, pruned)

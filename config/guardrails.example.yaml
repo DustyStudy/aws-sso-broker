@@ -20,13 +20,33 @@ protected_account_ids:
 # Glob patterns (fnmatch-style) matched against the full joined command string.
 # Anything matching here is blocked, in addition to the tool's built-in defaults
 # (delete-account-alias, leave-organization, close-account, recursive S3 rm, etc).
+# "aws*<service>" rather than "aws <service>" also matches when a global flag
+# sits in between ("aws --region x kms ..."). Patterns match from the start of
+# the command, so a wrapper ("sudo aws ...", "bash -c ...") is not caught.
+# Only `ssobroker exec` checks these; `aws --profile` via creds-process does not.
 deny_patterns:
-  - "aws iam delete-role*"
-  - "aws ec2 terminate-instances*"
+  - "aws*iam delete-role*"
+  - "aws*ec2 terminate-instances*"
+  # Uncomment what fits your org:
+  # - "aws*kms schedule-key-deletion*"
+  # - "aws*kms disable-key*"
+  # - "aws*cloudtrail delete-trail*"
+  # - "aws*cloudtrail stop-logging*"
+  # - "aws*guardduty delete-detector*"
+  # - "aws*s3api delete-bucket *"
+  # - "aws*s3api put-bucket-policy*"
+  # - "aws*rds delete-db-instance*--skip-final-snapshot*"
+  # - "aws*rds delete-db-cluster*--skip-final-snapshot*"
+  # - "aws*dynamodb delete-table*"
+  # - "aws*iam create-access-key*"
+  # - "terraform destroy*"
 
 # Patterns that are allowed but require an interactive y/N confirmation
 # (skip with `--yes` for scripted/CI use where you trust the caller).
+# With no terminal to ask (CI, a pipe), the answer is no.
 require_confirmation_patterns:
-  - "aws s3 rm*"
-  - "aws rds delete-db-instance*"
-  - "aws cloudformation delete-stack*"
+  - "aws*s3 rm*"
+  - "aws*rds delete-db-instance*"
+  - "aws*cloudformation delete-stack*"
+  # - "terraform apply*"
+  # - "aws*ec2 stop-instances*"

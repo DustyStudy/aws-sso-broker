@@ -51,7 +51,19 @@ def _logging_role_credentials(cfg: config.OrgConfig) -> Callable[[], dict] | Non
         return None
     account_id = config.logging_account_id(cfg)
     role = cfg.cloudwatch_role
-    return lambda: sso.get_role_credentials(_sso_login(cfg), account_id, role)
+
+    def _provider() -> dict:
+        creds, fresh = sso.fetch_role_credentials(_sso_login(cfg), account_id, role)
+        if fresh:  # a credential issue like any other, so it is audited too
+            audit.record(
+                action="audit-forward",
+                account_id=account_id,
+                role=role,
+                access_key_id=creds["AccessKeyId"],
+            )
+        return creds
+
+    return _provider
 
 
 def _prepare(cfg: config.OrgConfig) -> config.OrgConfig:
@@ -101,11 +113,17 @@ def _guard(fn: Callable[..., T], *args: object, **kwargs: object) -> T:
 
 
 def _resolve_and_get_creds(
-    cfg: config.OrgConfig, token: sso.SsoToken, account: str, role: str | None
+    cfg: config.OrgConfig, token: sso.SsoToken, account: str, role: str | None, *, action: str
 ) -> tuple[config.Account, str, dict]:
     acct = config.resolve_account(cfg, account)
     resolved_role = config.resolve_role(acct, role)
     creds = sso.get_role_credentials(token, acct.account_id, resolved_role)
+    audit.record(
+        action=action,
+        account_id=acct.account_id,
+        role=resolved_role,
+        access_key_id=creds["AccessKeyId"],
+    )
     return acct, resolved_role, creds
 
 
@@ -197,7 +215,21 @@ def login(use_device_code: bool):
 @click.option(
     "--dry-run", is_flag=True, help="Show what would be written without touching the file"
 )
-def sync_aws_config(prefix: str, all_roles: bool, dry_run: bool):
+@click.option(
+    "--prune",
+    is_flag=True,
+    help="Also remove profiles ssobroker wrote earlier that this run would not write "
+    "(accounts dropped from orgs.yaml, or written with another --prefix)",
+)
+@click.option(
+    "--python-launcher",
+    is_flag=True,
+    help="Start ssobroker as '<this python> -m ssobroker' in credential_process, for "
+    "machines where the ssobroker launcher is blocked (e.g. Smart App Control) or not on PATH",
+)
+def sync_aws_config(
+    prefix: str, all_roles: bool, dry_run: bool, prune: bool, python_launcher: bool
+):
     """Write credential_process profiles into ~/.aws/config for every account
     (and role, with --all-roles) in your registry.
 
@@ -208,8 +240,13 @@ def sync_aws_config(prefix: str, all_roles: bool, dry_run: bool):
     """
     cfg = _load_config_or_exit()
     try:
-        written, skipped, conflicts, path, backup = aws_config_sync.sync(
-            cfg, prefix=prefix, all_roles=all_roles, dry_run=dry_run
+        written, skipped, conflicts, path, backup, pruned = aws_config_sync.sync(
+            cfg,
+            prefix=prefix,
+            all_roles=all_roles,
+            dry_run=dry_run,
+            prune=prune,
+            launcher=aws_config_sync.python_launcher() if python_launcher else "ssobroker",
         )
     except ConfigError as e:
         err_console.print(f"[red]Config error:[/red] {escape(str(e))}")
@@ -231,6 +268,9 @@ def sync_aws_config(prefix: str, all_roles: bool, dry_run: bool):
             f"(use --prefix to pick different profile names, or rename/remove the existing "
             f"section yourself first)"
         )
+    if pruned:
+        verb = "Would remove" if dry_run else "Removed"
+        console.print(f"[yellow]{verb} {len(pruned)} profile(s):[/yellow] {', '.join(pruned)}")
     if backup:
         console.print(f"[dim]Backup saved to {backup}[/dim]")
 
@@ -457,11 +497,20 @@ def exec_command(
     default=None,
     help="Free-text justification recorded in the local audit log for this session.",
 )
-def shell(account: str, role: str | None, region: str | None, reason: str | None):
+@click.option(
+    "--refresh",
+    is_flag=True,
+    help="Give the subshell an AWS profile that fetches fresh credentials as they expire, "
+    "instead of fixed keys. Works for tools that read AWS profiles (AWS CLI, SDKs, "
+    "Terraform), not for ones that only read AWS_ACCESS_KEY_ID.",
+)
+def shell(account: str, role: str | None, region: str | None, reason: str | None, refresh: bool):
     """Spawn a subshell with credentials for --account/--role exported."""
     cfg = _load_config_or_exit()
     token = _login_or_exit(cfg)
-    code = _guard(exec_cmd.spawn_shell, cfg, token, account, role, region, reason=reason)
+    code = _guard(
+        exec_cmd.spawn_shell, cfg, token, account, role, region, reason=reason, refresh=refresh
+    )
     sys.exit(code)
 
 
@@ -555,7 +604,9 @@ def whoami(account: str, role: str | None):
     """Show the STS identity you'd get for --account/--role right now."""
     cfg = _load_config_or_exit()
     token = _login_or_exit(cfg)
-    acct, resolved_role, creds = _guard(_resolve_and_get_creds, cfg, token, account, role)
+    acct, resolved_role, creds = _guard(
+        _resolve_and_get_creds, cfg, token, account, role, action="whoami"
+    )
 
     import boto3
 
@@ -591,7 +642,9 @@ def check_policy(account: str, role: str | None, action: str, resource: str):
 
     cfg = _load_config_or_exit()
     token = _login_or_exit(cfg)
-    _acct, _resolved_role, creds = _guard(_resolve_and_get_creds, cfg, token, account, role)
+    _acct, _resolved_role, creds = _guard(
+        _resolve_and_get_creds, cfg, token, account, role, action="check-policy"
+    )
 
     try:
         role_arn = policy_check.resolve_role_arn(creds, cfg.default_region)
