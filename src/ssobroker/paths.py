@@ -13,7 +13,7 @@ from pathlib import Path
 
 from . import policy
 
-_LEGACY_DIRNAME = ".orgctl"
+LEGACY_DIRNAME = ".orgctl"
 
 
 def home_dir() -> Path:
@@ -21,7 +21,7 @@ def home_dir() -> Path:
     if override:
         return Path(override)
     current = Path.home() / ".ssobroker"
-    legacy = Path.home() / _LEGACY_DIRNAME
+    legacy = Path.home() / LEGACY_DIRNAME
     if not current.exists() and legacy.is_dir():
         return legacy
     return current

@@ -223,3 +223,10 @@ def test_doctor_escapes_rich_markup_in_paths(tmp_path, monkeypatch, _doctor_env)
     result = CliRunner().invoke(cli.main, ["doctor"])
     # rich wraps long lines; compare without whitespace
     assert "[red]creds" in "".join(result.output.split())
+
+
+def test_doctor_notes_the_deprecated_orgctl_folder(tmp_path, monkeypatch, _doctor_env):
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path / ".orgctl"))
+    result = CliRunner().invoke(cli.main, ["doctor"])
+    assert "old orgctl folder" in _flat(result.output)
+    assert result.exit_code == 0

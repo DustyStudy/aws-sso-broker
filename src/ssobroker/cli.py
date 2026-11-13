@@ -21,6 +21,7 @@ from . import (
     exposure,
     guardrails,
     network,
+    paths,
     policy,
     sso,
 )
@@ -343,6 +344,12 @@ def doctor(strict: bool):
         console.print(f"[red]FAIL[/red] cache dir not writable: {cdir} ({write_error})")
     else:
         console.print(f"[green]OK[/green] cache dir writable: {cdir}")
+
+    if home_dir().name == paths.LEGACY_DIRNAME:
+        console.print(
+            f"[yellow]NOTE[/yellow] using the old orgctl folder {escape(str(home_dir()))}; "
+            "move it to ~/.ssobroker. Support for it will be removed in a future release."
+        )
 
     gcfg_path = home_dir() / "guardrails.yaml"
     if gcfg_path.exists():

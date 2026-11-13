@@ -157,6 +157,10 @@ dedicated role that can only write to the group:
 }
 ```
 
+In GovCloud the ARN partition is `aws-us-gov`
+(`arn:aws-us-gov:logs:us-gov-west-1:...`). In Terraform, build it from
+`data.aws_partition.current.partition` so one policy works in both.
+
 Encrypt the log group with KMS and restrict who can read it: entries include
 command lines.
 

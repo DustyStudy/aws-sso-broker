@@ -5,10 +5,13 @@ the other install options, every command and the configuration files.
 
 ## Features
 
-- **SSO-only, phishing-resistant sign-in.** Uses the AWS SSO OIDC
-  authorization-code grant with PKCE and a `127.0.0.1` redirect, the same
+- **SSO-only sign-in that resists device-code phishing.** Uses the AWS SSO
+  OIDC authorization-code grant with PKCE and a `127.0.0.1` redirect, the same
   flow `aws sso login` uses in AWS CLI v2.22+. Only a browser on the same
-  machine can finish the sign-in. The device-code flow is still there for
+  machine can finish the sign-in, so a sign-in link sent to someone else gets
+  an attacker nothing. Whether the sign-in itself is phishing-resistant in the
+  OMB M-22-09 sense (FIDO2/WebAuthn or PIV) depends on the MFA your identity
+  provider requires, not on ssobroker. The device-code flow is still there for
   headless machines (`login --use-device-code`) and can be turned off by an
   admin. There is no code path that accepts or stores a long-lived access key.
 - **Account/role registry** (`orgs.yaml`): give your accounts human-friendly
@@ -17,8 +20,14 @@ the other install options, every command and the configuration files.
   CLI (or any) command with the right credentials exported into that
   process's environment only.
 - **`ssobroker shell -a <account> -r <role>`**: drop into a subshell with
-  credentials exported, prompt tagged with the active account/role so you
-  always know where you are.
+  credentials exported. `SSOBROKER_ACTIVE_CONTEXT` holds `[alias:role]` so
+  your prompt can show it. On Linux/macOS, `PS1` is set to that tag too when
+  the parent shell didn't export one, but a shell that sets its own prompt in
+  its startup file (most `.bashrc`/`.zshrc` do) replaces it. Windows shells get
+  only the variable. To always see it, add it to your prompt, e.g.
+  `PS1='${SSOBROKER_ACTIVE_CONTEXT:+$SSOBROKER_ACTIVE_CONTEXT }'"$PS1"` in
+  `.bashrc`, or in your PowerShell `$PROFILE`
+  `function prompt { "$env:SSOBROKER_ACTIVE_CONTEXT PS $PWD> " }`.
 - **Local guardrails** (`guardrails.yaml`): optional deny-patterns and
   "protected account" list to stop an obviously wrong command (or a
   fat-fingered wrong terminal tab) before it reaches AWS. This is a client-side
@@ -139,6 +148,10 @@ carry over. Environment overrides are now `SSOBROKER_HOME`,
 (the keychain entry is stored under the new name), then re-run
 `ssobroker sync-aws-config`: profiles written by orgctl are recognised and
 rewritten to call `ssobroker`.
+
+This compatibility is deprecated and will be removed in a future release.
+Move `~/.orgctl` to `~/.ssobroker` and re-run `sync-aws-config` now;
+`ssobroker doctor` reports it while the old folder is still in use.
 
 ## Commands
 
