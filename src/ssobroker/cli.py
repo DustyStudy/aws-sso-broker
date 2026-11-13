@@ -109,6 +109,12 @@ def _resolve_and_get_creds(
     return acct, resolved_role, creds
 
 
+def _add_row(table: Table, *cells: object) -> None:
+    """Add a row of plain text. Cells come from the audit log, orgs.yaml or AWS,
+    so Rich must not read "[...]" in them as markup (a stray "[/x]" crashes it)."""
+    table.add_row(*(escape("-" if c is None else str(c)) for c in cells))
+
+
 def _fetch_remote_accounts(token: sso.SsoToken) -> list[dict]:
     return [
         {
@@ -348,14 +354,15 @@ def accounts(tag: str | None, as_json: bool):
         return
 
     title = f"Accounts — {cfg.name}" + (f" (tag: {tag})" if tag else "")
-    table = Table(title=title)
+    table = Table(title=escape(title))
     table.add_column("Alias")
     table.add_column("Account ID")
     table.add_column("Roles")
     table.add_column("Default role")
     table.add_column("Tags")
     for acct in matched:
-        table.add_row(
+        _add_row(
+            table,
             acct.alias,
             acct.account_id,
             ", ".join(acct.roles) or "-",
@@ -384,7 +391,7 @@ def list_remote(as_json: bool):
     table.add_column("Account Name")
     table.add_column("Roles")
     for acct in remote:
-        table.add_row(acct["account_id"], acct["account_name"], ", ".join(acct["roles"]))
+        _add_row(table, acct["account_id"], acct["account_name"], ", ".join(acct["roles"]))
     console.print(table)
 
 
@@ -641,14 +648,15 @@ def audit_log(n: int, as_json: bool, push_cloudwatch: bool):
         table.add_column("Reason")
         table.add_column("Command")
         for e in entries:
-            table.add_row(
+            _add_row(
+                table,
                 e.get("ts", "-"),
                 e.get("action", "-"),
                 e.get("account_id", "-"),
                 e.get("role", "-"),
                 e.get("result", "-"),
                 e.get("reason") or "-",
-                " ".join(e.get("command") or []),
+                " ".join(str(arg) for arg in e.get("command") or []),
             )
         console.print(table)
 

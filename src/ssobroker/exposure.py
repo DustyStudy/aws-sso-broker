@@ -77,11 +77,25 @@ def _when(epoch: float) -> str:
     return datetime.fromtimestamp(epoch, tz=UTC).strftime("%Y-%m-%d %H:%M UTC")
 
 
+def _unchecked(where: Path, count: int, level: str) -> list[Finding]:
+    """A finding for files that exist but could not be read, so a scan never
+    reports a clean machine it could not actually check."""
+    if not count:
+        return []
+    return [
+        Finding(
+            level,
+            f"{count} file(s) in {where} could not be checked (unreadable, too large or "
+            "too many); check them by hand for AWS credentials.",
+        )
+    ]
+
+
 def check_shared_credentials(path: Path | None = None) -> list[Finding]:
     path = path or _credentials_file()
     text = _read_small(path)
     if text is None:
-        return []
+        return _unchecked(path, int(path.exists()), "WARN")
     parser = configparser.RawConfigParser(strict=False, interpolation=None)
     try:
         parser.read_string(text, source=str(path))
@@ -117,11 +131,18 @@ def check_shared_credentials(path: Path | None = None) -> list[Finding]:
     return findings
 
 
-def _json_files(directory: Path) -> list[Path]:
+def _json_files(directory: Path) -> tuple[list[Path], int]:
+    """The files to check, and how many were left out (over the cap, or 1 for
+    a folder that exists but can't be listed)."""
     try:
-        return sorted(directory.glob("*.json"))[:_MAX_CACHE_FILES]
+        # Not Path.glob: it hides a permission error as an empty folder.
+        names = sorted(n for n in os.listdir(directory) if n.endswith(".json"))
+    except FileNotFoundError:
+        return [], 0
     except OSError:
-        return []
+        return [], 1
+    files = [directory / n for n in names]
+    return files[:_MAX_CACHE_FILES], max(0, len(files) - _MAX_CACHE_FILES)
 
 
 def check_cli_sso_cache(directory: Path | None = None, now: float | None = None) -> list[Finding]:
@@ -130,8 +151,12 @@ def check_cli_sso_cache(directory: Path | None = None, now: float | None = None)
     live = 0
     refreshable = 0
     latest = 0.0
-    for path in _json_files(directory):
+    files, skipped = _json_files(directory)
+    for path in files:
         text = _read_small(path)
+        if text is None:
+            skipped += 1
+            continue
         try:
             entry = json.loads(text) if text else None
         except ValueError:
@@ -147,8 +172,9 @@ def check_cli_sso_cache(directory: Path | None = None, now: float | None = None)
         else:
             continue
         latest = max(latest, expires or 0.0)
+    unchecked = _unchecked(directory, skipped, "WARN")
     if not live and not refreshable:
-        return []
+        return unchecked
     detail = []
     if refreshable:
         detail.append(f"{refreshable} can be refreshed until the Identity Center session ends")
@@ -161,7 +187,8 @@ def check_cli_sso_cache(directory: Path | None = None, now: float | None = None)
             f"AWS CLI SSO tokens in {directory}: {', '.join(detail)}{expiry}. A stolen token "
             "mints role credentials for every account you can reach. Run `aws sso logout` "
             "when you are done, or sign in through ssobroker only.",
-        )
+        ),
+        *unchecked,
     ]
 
 
@@ -169,8 +196,12 @@ def check_cli_role_cache(directory: Path | None = None, now: float | None = None
     directory = directory or _aws_dir() / "cli" / "cache"
     now = time.time() if now is None else now
     live = 0
-    for path in _json_files(directory):
+    files, skipped = _json_files(directory)
+    for path in files:
         text = _read_small(path)
+        if text is None:
+            skipped += 1
+            continue
         try:
             entry = json.loads(text) if text else None
         except ValueError:
@@ -181,14 +212,17 @@ def check_cli_role_cache(directory: Path | None = None, now: float | None = None
         expires = _parse_time(creds.get("Expiration"))
         if expires is not None and expires > now:
             live += 1
+    # Role credentials expire on their own, so files left unchecked here are a NOTE.
+    unchecked = _unchecked(directory, skipped, "NOTE")
     if not live:
-        return []
+        return unchecked
     return [
         Finding(
             "NOTE",
             f"{live} unexpired role credential set(s) cached by the AWS CLI in {directory}. "
             "They expire on their own; delete the files to end them early on this machine.",
-        )
+        ),
+        *unchecked,
     ]
 
 

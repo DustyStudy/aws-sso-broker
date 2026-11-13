@@ -9,6 +9,7 @@ equivalents / manual testing, same rationale as test_policy_check.py).
 from __future__ import annotations
 
 import json
+import signal
 
 import pytest
 
@@ -110,6 +111,46 @@ def test_protected_account_id_blocks_regardless_of_command(cfg, fake_get_creds, 
 
     assert rc == 2
     assert fake_get_creds == []
+
+
+def test_confirmation_with_no_terminal_counts_as_no(
+    cfg, fake_get_creds, fake_subprocess, monkeypatch, tmp_path
+):
+    gcfg = guardrails.GuardrailConfig(require_confirmation_patterns=["aws ec2 terminate*"])
+
+    def _closed_stdin(_prompt):
+        raise EOFError
+
+    monkeypatch.setattr("builtins.input", _closed_stdin)
+    rc = exec_cmd.run(
+        cfg,
+        sso_token=None,
+        account_alias_or_id="prod",
+        role="admin",
+        command=["aws", "ec2", "terminate-instances"],
+        gcfg=gcfg,
+    )
+    assert rc == 1 and fake_subprocess == []
+    assert _last_audit_entry(tmp_path)["result"] == "cancelled"
+
+
+def test_ctrl_c_while_the_child_runs_does_not_kill_it(monkeypatch):
+    # subprocess.run kills its child on KeyboardInterrupt; the parent must not raise one.
+    seen = {}
+
+    class _Done:
+        returncode = 0
+
+    def _fake_run(argv, env):
+        seen["handler"] = signal.getsignal(signal.SIGINT)
+        seen["handler"](signal.SIGINT, None)  # what Ctrl-C would call: must not raise
+        return _Done()
+
+    monkeypatch.setattr(exec_cmd.subprocess, "run", _fake_run)
+    before = signal.getsignal(signal.SIGINT)
+    assert exec_cmd._run_child(["x"], {}) == 0
+    assert seen["handler"] is not signal.default_int_handler
+    assert signal.getsignal(signal.SIGINT) is before  # restored afterwards
 
 
 def test_confirmation_declined_stops_before_running(

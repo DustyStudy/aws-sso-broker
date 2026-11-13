@@ -9,6 +9,7 @@ from __future__ import annotations
 import os
 import shlex
 import shutil
+import signal
 import subprocess
 import sys
 import time
@@ -49,6 +50,23 @@ def _creds_to_env(creds: dict, region: str) -> dict:
             "%Y-%m-%dT%H:%M:%SZ", time.gmtime(creds["Expiration"] / 1000)
         )
     return env
+
+
+def _run_child(argv: list[str], env: dict) -> int:
+    """Run argv and wait for it to exit.
+
+    Ctrl-C goes to every process on the console, the child included. Left as
+    KeyboardInterrupt here, it made subprocess.run kill the child, so the first
+    Ctrl-C at a `shell` prompt ended the whole subshell. A no-op handler lets
+    the child decide; exec resets it to the default in the child on POSIX."""
+    try:
+        previous = signal.signal(signal.SIGINT, lambda *_: None)
+    except ValueError:  # not the main thread: can't install handlers there
+        return subprocess.run(argv, env=env).returncode  # noqa: S603 - see callers
+    try:
+        return subprocess.run(argv, env=env).returncode  # noqa: S603 - see callers
+    finally:
+        signal.signal(signal.SIGINT, previous)
 
 
 def _default_shell(env: dict) -> str:
@@ -126,7 +144,11 @@ def run(
             f"('{confirm_pattern}'):\n  {joined}\nagainst account "
             f"{account.alias} ({account.account_id}) as {resolved_role}.",
         )
-        answer = input("Continue? [y/N] ").strip().lower()
+        try:
+            answer = input("Continue? [y/N] ").strip().lower()
+        except EOFError:  # no terminal to ask (CI, a pipe): the answer is no
+            print(file=sys.stderr)
+            answer = ""
         if answer != "y":
             audit.record(
                 action="exec",
@@ -173,8 +195,7 @@ def run(
         access_key_id=creds["AccessKeyId"],
     )
 
-    proc = subprocess.run(command, env=env)  # noqa: S603 - runs the command the user typed, by design
-    return proc.returncode
+    return _run_child(command, env)  # runs the command the user typed, by design
 
 
 def spawn_shell(
@@ -235,8 +256,7 @@ def spawn_shell(
             file=sys.stderr,
         )
 
-    proc = subprocess.run([shell], env=env)  # noqa: S603 - the user's own shell, by design
-    return proc.returncode
+    return _run_child([shell], env)  # the user's own shell, by design
 
 
 def export_env_lines(

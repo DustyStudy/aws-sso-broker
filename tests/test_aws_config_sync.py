@@ -117,6 +117,13 @@ def test_prefix_keeps_one_profile_per_account():
     )
 
 
+@pytest.mark.parametrize("prefix", ["x]\ncredential_process = evil\n[profile y", "a b", "a/b"])
+def test_prefix_that_could_inject_config_lines_is_refused(prefix):
+    with pytest.raises(ConfigError, match="--prefix"):
+        aws_config_sync.sync(_three_accounts(), prefix=prefix)
+    assert not aws_config_sync.aws_config_path().exists()
+
+
 def test_prefix_with_all_roles_keeps_one_profile_per_account_and_role():
     written, _, _, _, _ = aws_config_sync.sync(_three_accounts(), prefix="sso", all_roles=True)
     assert sorted(written) == ["sso-a-ro", "sso-b-ro", "sso-c-admin", "sso-c-ro"]

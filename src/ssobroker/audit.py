@@ -51,6 +51,7 @@ DEFAULT_REDACT_PATTERNS = [
     "*api_key*",
     "*apikey*",
     "*credential*",
+    "*plaintext*",  # kms encrypt --plaintext
     "cli-input-*",  # --cli-input-json/--cli-input-yaml carry whole request bodies
 ]
 # HTTP headers that carry credentials, e.g. curl -H "Authorization: Bearer ...".
@@ -123,10 +124,9 @@ def redact_command(command: list[str], extra_patterns: list[str] | None = None) 
             out.append(REDACTED)
             redact_next = False
             continue
-        header = _SECRET_HEADER_RE.sub(rf"\1\2{REDACTED}", arg)
-        if header != arg:
-            out.append(header)
-            continue
+        # Keep checking after a header match: a multi-line document can carry a
+        # header line and a "password" key both.
+        arg = _SECRET_HEADER_RE.sub(rf"\1\2{REDACTED}", arg)
         flag, sep, value = arg.partition("=") if arg.startswith("-") else ("", "", arg)
         if value.lstrip().startswith(("{", "[")) and _is_secret_name(value, patterns):
             out.append(f"{flag}{sep}{REDACTED}")
@@ -298,7 +298,12 @@ def _push_pending(log_group: str, region: str, credentials: dict | None) -> int:
     import boto3
 
     path = log_path()
-    lines = path.read_text(encoding="utf-8").splitlines() if path.exists() else []
+    text = path.read_text(encoding="utf-8") if path.exists() else ""
+    lines = text.splitlines()
+    if lines and not text.endswith("\n"):
+        # Another process is still appending this line: leave it, and the
+        # cursor, for the next push instead of skipping it for good.
+        lines.pop()
     start = _read_cursor(len(lines))
     pending = lines[start:]
     if not pending:

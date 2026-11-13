@@ -211,3 +211,40 @@ def test_id_shaped_alias_must_match_its_account_id(tmp_path):
         tmp_path, head + "accounts:\n  '111111111111':\n    account_id: '111111111111'\n"
     )
     assert config.resolve_account(config.load(ok), "111111111111").account_id == "111111111111"
+
+
+_BASE = """
+name: test-org
+sso_start_url: https://example.awsapps.com/start
+sso_region: us-east-1
+accounts:
+  prod:
+    account_id: "123456789012"
+    roles: [read-only]
+    default_role: {default_role}
+{extra}
+"""
+
+
+def _load(tmp_path, default_role="read-only", extra=""):
+    return config.load(
+        write_orgs_yaml(tmp_path, _BASE.format(default_role=default_role, extra=extra))
+    )
+
+
+def test_default_role_must_be_one_of_the_listed_roles(tmp_path):
+    # Otherwise omitting --role reaches a role that --role itself would refuse.
+    with pytest.raises(config.ConfigError, match="default_role"):
+        _load(tmp_path, default_role="AdministratorAccess")
+
+
+@pytest.mark.parametrize("value", ['"false"', "yes-please", "1"])
+def test_use_fips_endpoint_must_be_a_real_boolean(tmp_path, value):
+    with pytest.raises(config.ConfigError, match="use_fips_endpoint"):
+        _load(tmp_path, extra=f"use_fips_endpoint: {value}")
+
+
+@pytest.mark.parametrize("value", ["eight", "0", "-1", "true", ".inf", ".nan"])
+def test_max_session_hours_must_be_a_positive_number(tmp_path, value):
+    with pytest.raises(config.ConfigError, match="max_session_hours"):
+        _load(tmp_path, extra=f"max_session_hours: {value}")

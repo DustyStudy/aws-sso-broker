@@ -90,6 +90,19 @@ def test_push_sends_only_entries_not_yet_pushed(logs_client):
     assert sorted(account_ids) == ["111", "222"]
 
 
+def test_push_leaves_a_half_written_line_for_the_next_push(logs_client):
+    audit.record(action="exec", account_id="111", role="r")
+    with audit.log_path().open("a", encoding="utf-8") as f:
+        f.write('{"action": "exec", "account_id": "222"')  # another process mid-append
+    assert audit.push_to_cloudwatch(LOG_GROUP, REGION) == 1
+
+    with audit.log_path().open("a", encoding="utf-8") as f:
+        f.write(', "role": "r"}\n')
+    assert audit.push_to_cloudwatch(LOG_GROUP, REGION) == 1
+    account_ids = [json.loads(e["message"])["account_id"] for e in _get_events(logs_client)]
+    assert sorted(account_ids) == ["111", "222"]
+
+
 def test_push_starts_over_if_log_was_truncated(logs_client):
     for i in range(3):
         audit.record(action="exec", account_id=str(i), role="r")

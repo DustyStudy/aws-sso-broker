@@ -423,6 +423,19 @@ def keyring_leftovers() -> int:
     return len(_keyring_index())
 
 
+def clear_prefix(prefix: str, *, keyring: bool = True) -> int:
+    """Remove every file entry whose key starts with `prefix`, and the
+    keychain ones too unless keyring=False. Returns count removed."""
+    removed = 0
+    for p in cache_dir().glob(f"{prefix}*.json"):
+        p.unlink(missing_ok=True)
+        removed += 1
+    if keyring:
+        for k in [k for k in _keyring_index() if k.startswith(prefix)]:
+            removed += _keyring_delete(k)
+    return removed
+
+
 def clear(key: str | None = None) -> int:
     """Remove one cache entry, or every entry if key is None. Returns count removed."""
     removed = 0
