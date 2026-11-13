@@ -37,6 +37,13 @@ require_confirmation_patterns:
 # Role credential cache: at least this strict (file < keyring < none).
 role_credential_cache: keyring
 
+# Network settings forced over orgs.yaml and the environment (FedRAMP/GovCloud
+# shops: require FIPS endpoints). Check the SSO and SSO OIDC FIPS endpoints
+# exist in your Identity Center region first.
+# use_fips_endpoint: true
+# ca_bundle: /etc/pki/proxy-root-ca.pem
+# https_proxy: http://proxy.example:8080
+
 # Added to the built-in audit redaction patterns.
 audit_redact_flags: ["*connection-string*"]
 

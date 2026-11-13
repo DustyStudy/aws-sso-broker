@@ -390,6 +390,47 @@ def test_spawn_shell_proceeds_when_account_not_protected(cfg, fake_get_creds, fa
     assert len(fake_subprocess) == 1
 
 
+def test_spawn_shell_refresh_uses_a_credential_process_profile(
+    cfg, fake_get_creds, monkeypatch, tmp_path
+):
+    import configparser
+    from pathlib import Path
+
+    seen = {}
+
+    class _Done:
+        returncode = 0
+
+    def _fake_run(argv, env):
+        seen["env"] = env
+        seen["config"] = Path(env["AWS_CONFIG_FILE"]).read_text()  # exists while the shell runs
+        return _Done()
+
+    monkeypatch.setattr(exec_cmd.subprocess, "run", _fake_run)
+    monkeypatch.setenv("AWS_SHARED_CREDENTIALS_FILE", str(tmp_path / "real-credentials"))
+    rc = exec_cmd.spawn_shell(
+        cfg,
+        sso_token=None,
+        account_alias_or_id="prod",
+        role="admin",
+        gcfg=guardrails.GuardrailConfig(),
+        refresh=True,
+    )
+
+    assert rc == 0
+    env = seen["env"]
+    # Fixed keys would win over the profile and never refresh.
+    assert "AWS_ACCESS_KEY_ID" not in env and "AWS_SESSION_TOKEN" not in env
+    assert env["AWS_PROFILE"] == "ssobroker-shell"
+    assert env["AWS_SHARED_CREDENTIALS_FILE"] != str(tmp_path / "real-credentials")
+    parser = configparser.ConfigParser()
+    parser.read_string(seen["config"])
+    process = parser.get("profile ssobroker-shell", "credential_process")
+    assert process.endswith("creds-process --account 111111111111 --role admin")
+    assert "-m ssobroker" in process
+    assert not Path(env["AWS_CONFIG_FILE"]).exists()  # removed when the shell exits
+
+
 def test_other_ambient_credential_sources_are_stripped(
     cfg, fake_get_creds, fake_subprocess, monkeypatch
 ):

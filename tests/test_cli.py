@@ -326,3 +326,21 @@ def test_doctor_reports_failure_when_cache_dir_is_not_writable(monkeypatch):
     assert result.exit_code == 1
     assert "FAIL" in result.output
     assert "not writable" in result.output
+
+
+def test_whoami_is_audited(monkeypatch):
+    monkeypatch.setattr(cli.sso, "get_role_credentials", lambda *a, **k: dict(FAKE_CREDS))
+
+    class _Sts:
+        def get_caller_identity(self):
+            return {"Account": "111111111111", "Arn": "arn:aws:sts::1:x", "UserId": "u"}
+
+    import boto3
+
+    monkeypatch.setattr(
+        boto3, "Session", lambda **k: type("S", (), {"client": lambda self, n: _Sts()})()
+    )
+    result = invoke("whoami", "-a", "prod")
+    assert result.exit_code == 0, result.output
+    entry = audit.tail(1)[0]
+    assert (entry["action"], entry["access_key_id"]) == ("whoami", "AKIAFAKE")

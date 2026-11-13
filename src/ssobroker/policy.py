@@ -52,6 +52,9 @@ _KNOWN_KEYS = {
     "cloudwatch_log_group",
     "cloudwatch_account",
     "cloudwatch_role",
+    "use_fips_endpoint",
+    "ca_bundle",
+    "https_proxy",
 }
 
 
@@ -76,6 +79,10 @@ class ManagedPolicy:
     cloudwatch_log_group: str | None = None
     cloudwatch_account: str | None = None
     cloudwatch_role: str | None = None
+    # Network settings the policy forces, over orgs.yaml and the environment.
+    use_fips_endpoint: bool = False
+    ca_bundle: str | None = None
+    https_proxy: str | None = None
 
     @property
     def active(self) -> bool:
@@ -258,7 +265,17 @@ def parse(raw: dict, path: Path | None) -> ManagedPolicy:
             str(raw["cloudwatch_account"]) if raw.get("cloudwatch_account") else None
         ),
         cloudwatch_role=raw.get("cloudwatch_role"),
+        use_fips_endpoint=_bool(raw, "use_fips_endpoint", False),
+        ca_bundle=_opt_str(raw, "ca_bundle"),
+        https_proxy=_opt_str(raw, "https_proxy"),
     )
+
+
+def _opt_str(raw: dict, key: str) -> str | None:
+    value = raw.get(key)
+    if value is not None and not isinstance(value, str):
+        raise PolicyError(f"Managed policy field '{key}' must be a string, got {value!r}")
+    return value or None
 
 
 @cache

@@ -31,6 +31,8 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import boto3
+from botocore import UNSIGNED
+from botocore.config import Config
 from botocore.exceptions import BotoCoreError, ClientError
 
 from . import cache
@@ -99,6 +101,17 @@ class SsoToken:
     role_credential_cache: str = "file"
 
 
+# SSO and SSO OIDC calls are authenticated by the SSO token or nothing, never
+# SigV4. Unsigned, boto3 also skips looking up AWS credentials, which matters:
+# with AWS_PROFILE naming a `creds-process` profile, that lookup would run
+# ssobroker again from inside itself, over and over.
+_UNSIGNED = Config(signature_version=UNSIGNED)
+
+
+def _client(service: str, region: str):
+    return boto3.client(service, region_name=region, config=_UNSIGNED)
+
+
 def _digest(value: str, n: int = 16) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()[:n]
 
@@ -159,7 +172,7 @@ def login(
     if flow == "device_code" and not allow_device_code:
         raise SsoLoginError("Device-code login is disabled by the managed policy.")
 
-    oidc = boto3.client("sso-oidc", region_name=region)
+    oidc = _client("sso-oidc", region)
     if flow == "device_code":
         token = _device_code_flow(oidc, start_url, region, open_browser)
     elif flow == "auth_code":
@@ -216,7 +229,7 @@ def _usable_token(
     client = cache.get(_client_cache_key(start_url, region, flow))
     if not refresh_token or not client:
         return None
-    oidc = boto3.client("sso-oidc", region_name=region)
+    oidc = _client("sso-oidc", region)
     try:
         token = oidc.create_token(
             clientId=client["clientId"],
@@ -474,7 +487,7 @@ _REFRESH_DEAD_CODES = {"InvalidGrantException", "ExpiredTokenException", "Invali
 def _logout_session(key: str, data: dict, region: str) -> None:
     """Call SSO Logout for one cached token. An expired access token is
     refreshed first, so a still-valid refresh token is ended at AWS too."""
-    portal = boto3.client("sso", region_name=region)
+    portal = _client("sso", region)
     try:
         portal.logout(accessToken=data["accessToken"])
         return
@@ -490,7 +503,7 @@ def _logout_session(key: str, data: dict, region: str) -> None:
     if not client:
         raise RuntimeError("refresh token could not be revoked (no client registration)")
     try:
-        token = boto3.client("sso-oidc", region_name=region).create_token(
+        token = _client("sso-oidc", region).create_token(
             clientId=client["clientId"],
             clientSecret=client["clientSecret"],
             grantType="refresh_token",
@@ -520,7 +533,7 @@ def _invalidate_if_token_rejected(sso_token: SsoToken, e: ClientError) -> None:
 
 
 def list_accounts(sso_token: SsoToken) -> list[dict[str, str]]:
-    client = boto3.client("sso", region_name=sso_token.region)
+    client = _client("sso", sso_token.region)
     accounts: list[dict[str, str]] = []
     try:
         paginator = client.get_paginator("list_accounts")
@@ -538,7 +551,7 @@ def list_accounts(sso_token: SsoToken) -> list[dict[str, str]]:
 
 
 def list_account_roles(sso_token: SsoToken, account_id: str) -> list[str]:
-    client = boto3.client("sso", region_name=sso_token.region)
+    client = _client("sso", sso_token.region)
     roles: list[str] = []
     try:
         paginator = client.get_paginator("list_account_roles")
@@ -579,7 +592,7 @@ def fetch_role_credentials(
         ):
             return cached["credentials"], False
 
-    client = boto3.client("sso", region_name=sso_token.region)
+    client = _client("sso", sso_token.region)
     try:
         resp = client.get_role_credentials(
             roleName=role_name,

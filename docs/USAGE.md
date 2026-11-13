@@ -23,6 +23,10 @@ the other install options, every command and the configuration files.
   "protected account" list to stop an obviously wrong command (or a
   fat-fingered wrong terminal tab) before it reaches AWS. This is a client-side
   speed bump, not a replacement for IAM permission boundaries or SCPs.
+  Deny and confirm patterns are checked by `exec` only, since it is the one
+  command that sees the command line. Profiles that use `creds-process`
+  (`aws --profile ...`, Terraform) get the protected-account check alone, and
+  only with `strict_protected_accounts: true`.
 - **Audit log** (`~/.ssobroker/audit.log`): every `exec`/`shell`/`export-env`
   invocation, and every `creds-process` call that gets new credentials, is
   appended as a JSON line: who, when, which account/role, what command, and
@@ -83,6 +87,7 @@ the other install options, every command and the configuration files.
   useful in scripts and CI steps.
 - **Session-expiry heads-up**: `ssobroker shell` prints how long the
   credentials have left, and a warning if it's under 15 minutes.
+  `ssobroker shell --refresh` keeps them fresh instead (see below).
 
 ## Install options
 
@@ -210,8 +215,38 @@ overwritten); a re-run that changes nothing writes nothing. `--prefix sso`
 names profiles `sso-<alias>` (`sso-<alias>-<role>` with `--all-roles`), and
 two registry entries that would map to the same profile name are rejected
 rather than one silently winning. ssobroker doesn't delete profiles it wrote
-earlier, so if you change `--prefix`/`--all-roles`, remove the old
-ssobroker-managed sections yourself. Re-run it any time your `orgs.yaml` changes.
+earlier unless you pass `--prune`, which removes every ssobroker-written
+profile this run would not write: accounts dropped from `orgs.yaml`, or
+profiles from an earlier `--prefix`/`--all-roles` choice. Combine it with
+`--dry-run` to see the list first. Re-run it any time your `orgs.yaml` changes.
+
+`--python-launcher` writes `"<this python>" -m ssobroker creds-process ...`
+instead of `ssobroker creds-process ...`. Use it where the `ssobroker`
+launcher is blocked (Windows Smart App Control) or not on the `PATH` that
+`aws`/`terraform` see.
+
+**On `shell --refresh`:** by default `shell` exports one set of credentials,
+which stop working when they expire. With `--refresh`, the subshell instead
+gets a temporary AWS config with one profile whose `credential_process` is
+`ssobroker creds-process`, and `AWS_PROFILE` pointing at it. The AWS CLI, the
+SDKs and Terraform then fetch new credentials themselves as the old ones run
+out. Tools that only read `AWS_ACCESS_KEY_ID` from the environment get no
+credentials in that mode, and your own `~/.aws/config` profiles aren't
+visible inside it. The temporary file holds no secret and is deleted when
+the shell exits.
+
+**On `export-env`:** it prints the same environment `exec` gives its child:
+it first unsets `AWS_PROFILE`, `AWS_ROLE_ARN` and the other variables that
+could mix in a different identity, then sets the keys, the region and
+`AWS_CREDENTIAL_EXPIRATION`.
+
+**On the audit log:** `exec`, `shell`, `export-env`, `whoami`, `check-policy`,
+`creds-process` (when it gets new credentials) and the CloudWatch logging
+role (`audit-forward`, when it gets new credentials) each write an entry.
+Commands typed inside a `shell` are not logged one by one; CloudTrail has
+those. Past 10 MB the log is renamed to `audit.log.<UTC timestamp>.<pid>`
+and a new one started. Rotated files are kept. With CloudWatch forwarding
+on, the log is only rotated once every entry in it has been sent.
 
 ## Configuration
 

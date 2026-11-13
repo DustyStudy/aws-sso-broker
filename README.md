@@ -78,7 +78,9 @@ guardrails do and do not protect against.
 - **Local guardrails**: protected accounts and deny/confirm patterns that
   stop an obviously wrong command before it reaches AWS. This is a
   client-side speed bump, not a replacement for IAM permission boundaries
-  or SCPs.
+  or SCPs. Deny/confirm patterns apply to `exec`; `credential_process`
+  profiles only get the protected-account check, with
+  `strict_protected_accounts`.
 - **Audit log**: one redacted JSON line per credential use, with the
   temporary `AccessKeyId` (the join key to CloudTrail). It can forward to
   syslog, the Windows Event Log or CloudWatch Logs.

@@ -52,6 +52,20 @@ def test_posix_lines_have_ordinary_values_unquoted(monkeypatch):
     assert "export AWS_REGION=us-east-1" in lines
 
 
+def test_export_env_matches_exec_environment(monkeypatch):
+    # Like exec: no inherited profile or role can mix in, and SDKs see the expiry.
+    _fake_creds(monkeypatch)
+    lines = exec_cmd.export_env_lines(CFG, TOKEN, "prod", "admin").splitlines()
+    assert lines[0].startswith("unset ") and "AWS_PROFILE" in lines[0].split()
+    assert "AWS_CREDENTIAL_EXPIRATION" not in lines[0].split()
+    assert "export AWS_CREDENTIAL_EXPIRATION=2286-11-20T17:46:39Z" in lines
+
+    ps = exec_cmd.export_env_lines(CFG, TOKEN, "prod", "admin", powershell=True).splitlines()
+    assert ps[0].startswith("Remove-Item -Path Env:AWS_PROFILE, ")
+    assert ps[0].endswith("-ErrorAction SilentlyContinue")
+    assert '$env:AWS_CREDENTIAL_EXPIRATION = "2286-11-20T17:46:39Z"' in ps
+
+
 def test_powershell_lines_have_ordinary_values_double_quoted(monkeypatch):
     _fake_creds(monkeypatch)
     lines = exec_cmd.export_env_lines(CFG, TOKEN, "prod", "admin", powershell=True)

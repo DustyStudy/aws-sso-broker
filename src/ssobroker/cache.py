@@ -236,11 +236,16 @@ def _replace(src: Path, dst: Path) -> None:
             time.sleep(0.05)
 
 
-@contextlib.contextmanager
-def _index_lock() -> Iterator[None]:
+def _index_lock() -> contextlib.AbstractContextManager[None]:
     """Hold an exclusive lock while reading and rewriting the keyring index,
     so two processes logging in at once don't drop each other's entries."""
-    with open(cache_dir() / ".keyring_index.lock", "a+b") as f:
+    return file_lock(cache_dir() / ".keyring_index.lock")
+
+
+@contextlib.contextmanager
+def file_lock(lock_path: Path) -> Iterator[None]:
+    """An exclusive lock between processes, held on `lock_path`."""
+    with open(lock_path, "a+b") as f:
         if sys.platform == "win32":
             import msvcrt
 

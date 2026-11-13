@@ -45,3 +45,29 @@ def test_entry_timestamp_ms_falls_back_when_ts_missing():
 
 def test_entry_timestamp_ms_falls_back_when_ts_unparseable():
     assert audit._entry_timestamp_ms({"ts": "not a timestamp"}, fallback_ms=456) == 456
+
+
+def test_large_log_is_rotated_and_kept(tmp_path, monkeypatch):
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
+    monkeypatch.setattr(audit, "_MAX_LOG_BYTES", 400)
+    for _ in range(3):
+        audit.record(action="exec", account_id="1", role="r")
+    rotated = list(tmp_path.glob("audit.log.*"))
+    assert len(rotated) == 1
+    assert len(audit.tail(10)) == 1  # the active log started over
+    assert rotated[0].read_text().count("\n") == 2
+
+
+def test_rotation_waits_for_entries_not_yet_in_cloudwatch(tmp_path, monkeypatch):
+    monkeypatch.setenv("SSOBROKER_HOME", str(tmp_path))
+    monkeypatch.setattr(audit, "_MAX_LOG_BYTES", 400)
+    monkeypatch.setattr(audit, "_forward", lambda entry: None)  # pushes "fail"
+    audit.configure(audit.AuditSettings(forward=["cloudwatch"]))
+    for _ in range(3):
+        audit.record(action="exec", account_id="1", role="r")
+    assert not list(tmp_path.glob("audit.log.*"))
+
+    audit._cursor_path().write_text("3")  # a push sent them all
+    audit.record(action="exec", account_id="1", role="r")
+    assert len(list(tmp_path.glob("audit.log.*"))) == 1
+    assert not audit._cursor_path().exists()  # the new log is counted from zero

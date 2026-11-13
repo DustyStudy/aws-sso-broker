@@ -179,6 +179,18 @@ They're exported to commands run by `exec` and `shell` as well. With
 `use_fips_endpoint`, check that the SSO and SSO OIDC FIPS endpoints exist in
 your Identity Center region first.
 
+The machine policy accepts the same three keys. There they are enforced:
+they win over both `orgs.yaml` and the environment, so a user can't turn
+FIPS off or route around the proxy. `use_fips_endpoint: false` in the policy
+enforces nothing.
+
+```yaml
+# policy.yaml
+use_fips_endpoint: true
+ca_bundle: /etc/pki/proxy-root-ca.pem
+https_proxy: http://proxy.example:8080
+```
+
 GovCloud works like any other region: set `sso_region` to your Identity
 Center's GovCloud region. The sign-in URL is built from the SSO OIDC endpoint
 for that region.
