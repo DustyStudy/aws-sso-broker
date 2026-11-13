@@ -11,6 +11,7 @@ never loosen them.
 
 from __future__ import annotations
 
+import math
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -142,15 +143,33 @@ def load(path: Path | None = None) -> OrgConfig:
                 f"Account alias '{alias}' looks like an account ID but points at {account_id}."
             )
         default_role = a.get("default_role")
+        roles = [_name(r, f"Role in account '{alias}'") for r in a.get("roles", [])]
+        if default_role and roles and default_role not in roles:
+            # resolve_role() refuses an unlisted --role, so the default must not slip past.
+            raise ConfigError(
+                f"Account '{alias}': default_role {default_role!r} is not in its roles {roles}"
+            )
         accounts[alias] = Account(
             alias=alias,
             account_id=account_id,
-            roles=[_name(r, f"Role in account '{alias}'") for r in a.get("roles", [])],
+            roles=roles,
             default_role=_name(default_role, "default_role") if default_role else None,
             tags=list(a.get("tags", [])),
         )
 
-    max_hours = float(raw.get("max_session_hours", 8.0))
+    max_hours = raw.get("max_session_hours", 8.0)
+    if (
+        isinstance(max_hours, bool)
+        or not isinstance(max_hours, int | float)
+        or not math.isfinite(max_hours)  # YAML .inf would lift the cap, .nan breaks it
+        or max_hours <= 0
+    ):
+        raise ConfigError(f"'max_session_hours' must be a positive number, got {max_hours!r}")
+    max_hours = float(max_hours)
+    use_fips = raw.get("use_fips_endpoint", False)
+    if not isinstance(use_fips, bool):
+        # bool("false") is True, which would turn FIPS on when it was meant to be off.
+        raise ConfigError(f"'use_fips_endpoint' must be true or false, got {use_fips!r}")
     if pol.max_session_hours is not None:
         max_hours = min(max_hours, pol.max_session_hours)
 
@@ -189,7 +208,7 @@ def load(path: Path | None = None) -> OrgConfig:
         audit_forward=audit_forward,
         ca_bundle=raw.get("ca_bundle"),
         https_proxy=raw.get("https_proxy"),
-        use_fips_endpoint=bool(raw.get("use_fips_endpoint", False)),
+        use_fips_endpoint=use_fips,
     )
 
     if "cloudwatch" in cfg.audit_forward and not cfg.cloudwatch_log_group:

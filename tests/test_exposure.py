@@ -84,10 +84,34 @@ def test_unparseable_credentials_file_is_a_note_not_a_crash(tmp_path):
     assert [f.level for f in exposure.check_shared_credentials()] == ["NOTE"]
 
 
-def test_oversized_credentials_file_is_skipped(tmp_path, monkeypatch):
+def test_oversized_credentials_file_is_a_warning_not_a_clean_result(tmp_path, monkeypatch):
+    # doctor --strict must not pass on a file it never looked inside.
     monkeypatch.setattr(exposure, "_MAX_FILE_BYTES", 10)
     _write_creds(tmp_path, "[x]\naws_access_key_id = fake-id\n")
-    assert exposure.check_shared_credentials() == []
+    findings = exposure.check_shared_credentials()
+    assert [f.level for f in findings] == ["WARN"]
+    assert "could not be checked" in findings[0].message
+
+
+def test_sso_cache_folder_that_cannot_be_listed_is_a_warning(tmp_path, monkeypatch):
+    _sso_cache(tmp_path, "a", {"accessToken": "t", "expiresAt": _iso(NOW + 3600)})
+
+    def _denied(path):
+        raise PermissionError(13, "Access is denied", str(path))
+
+    monkeypatch.setattr(exposure.os, "listdir", _denied)
+    findings = exposure.check_cli_sso_cache(now=NOW)
+    assert [f.level for f in findings] == ["WARN"]
+    assert "could not be checked" in findings[0].message
+
+
+def test_sso_cache_files_over_the_cap_are_a_warning(tmp_path, monkeypatch):
+    monkeypatch.setattr(exposure, "_MAX_CACHE_FILES", 1)
+    _sso_cache(tmp_path, "a", {"clientId": "c"})
+    _sso_cache(tmp_path, "b", {"accessToken": "t", "expiresAt": _iso(NOW + 3600)})
+    findings = exposure.check_cli_sso_cache(now=NOW)
+    assert [f.level for f in findings] == ["WARN"]
+    assert "1 file(s)" in findings[0].message
 
 
 # --- ~/.aws/sso/cache ---------------------------------------------------------

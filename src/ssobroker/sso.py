@@ -567,9 +567,10 @@ def fetch_role_credentials(
     cache_key = _role_creds_cache_key(sso_token, account_id, role_name)
     fingerprint = _token_fingerprint(sso_token)
 
-    if storage == "none":
-        cache.clear(cache_key)  # drop copies stored under an earlier, looser setting
-    else:
+    if storage != "file":
+        # Drop copies stored under an earlier, looser setting, for every role.
+        cache.clear_prefix("role-creds_", keyring=storage == "none")
+    if storage != "none":
         cached = cache.get(cache_key, keyring=use_keyring)
         if (
             cached

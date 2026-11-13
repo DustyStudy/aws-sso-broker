@@ -364,6 +364,20 @@ def test_role_credentials_never_cached_with_storage_none(monkeypatch):
     assert cache.keys("role-creds_") == []
 
 
+@pytest.mark.parametrize("storage", ["none", "keyring"])
+def test_stricter_storage_removes_every_roles_old_file(monkeypatch, storage):
+    fake = FakeSso()
+    monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: fake)
+    monkeypatch.setattr(cache, "_keyring_module", lambda: FakeKeyring())
+    sso.fetch_role_credentials(_token(), "111", "ro")
+    sso.fetch_role_credentials(_token(), "222", "admin")
+    assert len(list(cache.cache_dir().glob("role-creds_*.json"))) == 2
+
+    sso.fetch_role_credentials(_token(storage=storage), "111", "ro")
+
+    assert not list(cache.cache_dir().glob("role-creds_*.json"))
+
+
 def test_keyring_storage_without_keyring_does_not_write_a_file(monkeypatch):
     fake = FakeSso()
     monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: fake)

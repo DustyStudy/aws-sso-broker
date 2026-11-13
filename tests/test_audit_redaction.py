@@ -51,6 +51,15 @@ def _home(tmp_path, monkeypatch):
         (["curl", "-d", '{"password": "x"}'], ["curl", "-d", R]),
         (["tool", '--body={"api_key": "x"}'], ["tool", f"--body={R}"]),
         (["curl", "-d", '{"name": "x"}'], ["curl", "-d", '{"name": "x"}']),
+        # A header line no longer hides a secret key further down the same document.
+        (
+            ["curl", "-d", '{"note": "Authorization: Bearer abc",\n "password": "x"}'],
+            ["curl", "-d", R],
+        ),
+        (
+            ["aws", "kms", "encrypt", "--plaintext", "x"],
+            ["aws", "kms", "encrypt", "--plaintext", R],
+        ),
     ],
 )
 def test_redact_command(command, expected):

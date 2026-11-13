@@ -182,6 +182,14 @@ def test_export_env_errors_never_reach_the_evaluated_stdout(monkeypatch, account
     assert "Error" in result.stderr
 
 
+def test_audit_log_table_shows_brackets_in_commands_as_text():
+    # A logged "[/x]" used to crash the table as a Rich closing tag.
+    audit.record(action="exec", account_id="111111111111", role="ro", command=["echo", "[/x]"])
+    result = invoke("audit-log")
+    assert result.exit_code == 0, result.output
+    assert "[/x]" in result.output
+
+
 # --- creds-process -----------------------------------------------------------------
 
 

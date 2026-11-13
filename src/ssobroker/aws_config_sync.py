@@ -21,7 +21,7 @@ import time
 from pathlib import Path
 from typing import NamedTuple
 
-from .config import Account, ConfigError, OrgConfig
+from .config import Account, ConfigError, OrgConfig, _name
 
 # Written into every section this tool creates so a later run can tell
 # "I made this, safe to overwrite" apart from "this collides with a
@@ -190,6 +190,9 @@ def sync(
     identical. When an existing file is changed, it is first copied to a new
     timestamped `config.bak-<stamp>` file; earlier backups are never overwritten.
     """
+    if prefix:
+        # Profile names go into "[profile ...]" headers: a "]" or newline would inject lines.
+        _name(prefix, "--prefix")
     path = aws_config_path()
     desired, skipped = _managed_profiles_for(cfg, prefix, all_roles)
 
