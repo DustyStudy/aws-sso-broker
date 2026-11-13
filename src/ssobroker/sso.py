@@ -31,7 +31,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import boto3
-from botocore.exceptions import ClientError
+from botocore.exceptions import BotoCoreError, ClientError
 
 from . import cache
 
@@ -57,6 +57,18 @@ _LOGIN_TIMEOUT_SECONDS = 600
 
 # Refresh the SSO access token this long before it expires.
 _ACCESS_TOKEN_REFRESH_MARGIN_SECONDS = 120
+
+# CreateToken errors that say nothing about the refresh token itself, so a
+# failed refresh with one of these keeps the cached session. Anything else
+# (InvalidGrant, ExpiredToken, InvalidClient, ...) means sign in again.
+_REFRESH_TRANSIENT_CODES = {
+    "InternalServerException",
+    "ServiceUnavailableException",
+    "SlowDownException",
+    "ThrottlingException",
+    "TooManyRequestsException",
+    "RequestLimitExceeded",
+}
 
 
 class SsoLoginError(RuntimeError):
@@ -212,8 +224,18 @@ def _usable_token(
             grantType="refresh_token",
             refreshToken=refresh_token,
         )
-    except ClientError:
+    except ClientError as e:
+        code = e.response.get("Error", {}).get("Code")
+        status = e.response.get("ResponseMetadata", {}).get("HTTPStatusCode") or 0
+        if code in _REFRESH_TRANSIENT_CODES or status >= 500:  # e.g. a proxy's HTML 502
+            # Keep the cached session: a retry may well succeed, and a browser
+            # sign-in from inside credential_process would stall the caller.
+            raise SsoLoginError(
+                f"Could not refresh the SSO session ({code}); try again shortly."
+            ) from e
         return None  # session ended or was revoked: sign in again
+    except BotoCoreError as e:  # offline, DNS, proxy: same reasoning as above
+        raise SsoLoginError(f"Could not reach AWS to refresh the SSO session: {e}") from e
     refreshed = dict(token)
     # OAuth lets a refresh response omit the refresh token; keep using the old one then.
     refreshed.setdefault("refreshToken", refresh_token)
@@ -409,13 +431,25 @@ def _auth_code_flow(
         raise SsoLoginError(f"SSO login failed: {code}") from e
 
 
-def logout() -> tuple[int, list[str]]:
+def index_sessions(sessions: tuple[tuple[str, str], ...]) -> None:
+    """Look each (start_url, region) token up by name, which records a keychain
+    entry in the index so a following cache.clear() removes it. No AWS calls."""
+    for start_url, region in sessions:
+        cache.get(_token_cache_key(start_url, region), include_expired=True)
+
+
+def logout(sessions: tuple[tuple[str, str], ...] = ()) -> tuple[int, list[str]]:
     """Sign every cached SSO token out server-side, then clear the local cache.
+
+    `sessions` are (start_url, region) pairs from the loaded config. Their
+    keychain entries are looked up by name, so they are found even when the
+    keychain index is missing.
 
     Returns (entries cleared, errors). A token AWS already considers invalid
     is not an error. Role credentials that were already issued stay valid at
     AWS until they expire; this can't revoke those.
     """
+    index_sessions(sessions)
     errors: list[str] = []
     for key in cache.keys("sso-token_"):
         # Past the local session cap the Identity Center session (and its

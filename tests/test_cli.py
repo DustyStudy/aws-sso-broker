@@ -170,6 +170,18 @@ def test_export_env_expired_token_is_a_clean_error_not_a_traceback(monkeypatch):
     _clean_exit(result)
 
 
+@pytest.mark.parametrize("account", ["doesnotexist", "prod"])
+def test_export_env_errors_never_reach_the_evaluated_stdout(monkeypatch, account):
+    # `eval "$(ssobroker export-env ...)"` runs whatever is on stdout.
+    monkeypatch.setattr(
+        exec_cmd, "get_role_credentials", lambda *a, **k: (_ for _ in ()).throw(EXPIRED)
+    )
+    result = invoke("export-env", "-a", account)
+    _clean_exit(result)
+    assert result.stdout == ""
+    assert "Error" in result.stderr
+
+
 # --- creds-process -----------------------------------------------------------------
 
 
@@ -251,14 +263,16 @@ def test_login_use_device_code_passes_flow(monkeypatch):
 
 
 def test_logout_signs_out_server_side(monkeypatch):
-    monkeypatch.setattr(cli.sso, "logout", lambda: (2, []))
+    monkeypatch.setattr(cli.sso, "logout", lambda sessions=(): (2, []))
     result = invoke("logout")
     assert result.exit_code == 0
     assert "Cleared 2 cached entries" in result.output
 
 
 def test_logout_reports_server_side_failure_but_still_clears(monkeypatch):
-    monkeypatch.setattr(cli.sso, "logout", lambda: (1, ["us-east-1: EndpointConnectionError"]))
+    monkeypatch.setattr(
+        cli.sso, "logout", lambda sessions=(): (1, ["us-east-1: EndpointConnectionError"])
+    )
     result = invoke("logout")
     assert result.exit_code == 0
     assert "Server-side sign-out failed" in result.output
