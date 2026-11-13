@@ -28,6 +28,8 @@ from .config import ConfigError
 from .paths import home_dir
 
 console = Console()
+# Errors go to stderr: export-env's stdout is eval'd by the caller's shell.
+err_console = Console(stderr=True)
 
 T = TypeVar("T")
 
@@ -71,7 +73,7 @@ def _load_config_or_exit() -> config.OrgConfig:
     try:
         return _prepare(config.load())
     except ConfigError as e:
-        console.print(f"[red]Config error:[/red] {e}")
+        err_console.print(f"[red]Config error:[/red] {escape(str(e))}")
         sys.exit(1)
 
 
@@ -79,7 +81,7 @@ def _login_or_exit(cfg: config.OrgConfig, flow: str | None = None) -> sso.SsoTok
     try:
         return _sso_login(cfg, flow)
     except sso.SsoLoginError as e:
-        console.print(f"[red]Login failed:[/red] {e}")
+        err_console.print(f"[red]Login failed:[/red] {escape(str(e))}")
         sys.exit(1)
 
 
@@ -91,10 +93,10 @@ def _guard(fn: Callable[..., T], *args: object, **kwargs: object) -> T:
     try:
         return fn(*args, **kwargs)
     except (ConfigError, sso.SsoLoginError) as e:
-        console.print(f"[red]Error:[/red] {e}")
+        err_console.print(f"[red]Error:[/red] {escape(str(e))}")
         sys.exit(1)
     except guardrails.GuardrailBlocked as e:
-        console.print(f"[red]BLOCKED by guardrails:[/red] {e}")
+        err_console.print(f"[red]BLOCKED by guardrails:[/red] {escape(str(e))}")
         sys.exit(2)
 
 
@@ -204,7 +206,7 @@ def sync_aws_config(prefix: str, all_roles: bool, dry_run: bool):
             cfg, prefix=prefix, all_roles=all_roles, dry_run=dry_run
         )
     except ConfigError as e:
-        console.print(f"[red]Config error:[/red] {e}")
+        err_console.print(f"[red]Config error:[/red] {escape(str(e))}")
         sys.exit(1)
     verb = "Would write" if dry_run else "Wrote"
     console.print(
@@ -238,14 +240,19 @@ def logout(local_only: bool):
 
     Role credentials issued earlier stay valid at AWS until they expire."""
     errors: list[str] = []
+    sessions: tuple[tuple[str, str], ...] = ()
+    try:
+        cfg = config.load()
+        sessions = ((cfg.sso_start_url, cfg.sso_region),)
+    except ConfigError:
+        cfg = None  # the config is optional here; logout must still work
     if local_only:
+        sso.index_sessions(sessions)
         n = cache.clear()
     else:
-        try:
-            _prepare(config.load())
-        except ConfigError:
-            pass  # network settings are optional here; logout must still work
-        n, errors = sso.logout()
+        if cfg:
+            _prepare(cfg)
+        n, errors = sso.logout(sessions)
     console.print(f"Cleared {n} cached entr{'y' if n == 1 else 'ies'}.")
     left = cache.keyring_leftovers()
     if left:
@@ -281,7 +288,7 @@ def doctor(strict: bool):
         )
     except ConfigError as e:
         problems.append(str(e))
-        console.print(f"[red]FAIL[/red] config: {e}")
+        console.print(f"[red]FAIL[/red] config: {escape(str(e))}")
 
     cdir = cache.cache_dir()
     write_error = _cache_dir_writable_error(cdir)

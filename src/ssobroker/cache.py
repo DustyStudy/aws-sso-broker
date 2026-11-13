@@ -344,6 +344,10 @@ def get(key: str, *, keyring: bool | None = None, include_expired: bool = False)
                 except json.JSONDecodeError:
                     data = None
                 if data is not None:
+                    # The keychain outlives the index (another SSOBROKER_HOME, a
+                    # deleted cache dir): record the entry so clear/logout find it.
+                    if key not in _keyring_index():
+                        _keyring_index_add(key)
                     expires_at = data.get("expiresAt")
                     if not include_expired and expires_at is not None and time.time() >= expires_at:
                         _keyring_delete(key)

@@ -102,6 +102,7 @@ Download the wheel and `runtime-requirements.txt` from the
 
 ```bash
 gh attestation verify aws_sso_broker-*.whl --repo DustyStudy/aws-sso-broker
+gh attestation verify runtime-requirements.txt --repo DustyStudy/aws-sso-broker
 python3 -m pip install --require-hashes -r runtime-requirements.txt
 python3 -m pip install --no-deps aws_sso_broker-*.whl
 ```

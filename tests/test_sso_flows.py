@@ -6,6 +6,7 @@ from __future__ import annotations
 import base64
 import hashlib
 import http.client
+import json
 import threading
 import time
 from urllib.parse import parse_qs, urlencode, urlparse
@@ -482,6 +483,83 @@ def test_no_refresh_past_max_session_hours(monkeypatch):
     sso.login(START_URL, REGION, max_session_hours=4, flow="device_code")
     grants = [c["grantType"] for c in oidc.create_token_calls]
     assert grants == ["urn:ietf:params:oauth:grant-type:device_code"]  # fresh sign-in only
+
+
+@pytest.mark.parametrize("code", ["ThrottlingException", "InternalServerException"])
+def test_transient_refresh_error_keeps_the_session(monkeypatch, code):
+    oidc = RefreshingOidc(error=code)
+    monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: oidc)
+    monkeypatch.setattr(sso.webbrowser, "open", lambda url: pytest.fail("opened a browser"))
+    _cache_refreshable(issued_ago=2 * 3600, access_left=-10)
+
+    with pytest.raises(sso.SsoLoginError, match=code):
+        sso.login(START_URL, REGION)
+
+    stored = cache.get(sso._token_cache_key(START_URL, REGION))
+    assert stored and stored["refreshToken"] == "rt"
+
+
+def test_http_5xx_refresh_error_keeps_the_session(monkeypatch):
+    # A proxy's HTML 502 page parses as error code "502", not a named exception.
+    oidc = RefreshingOidc()
+
+    def _bad_gateway(**kwargs):
+        raise ClientError(
+            {"Error": {"Code": "502"}, "ResponseMetadata": {"HTTPStatusCode": 502}},
+            "CreateToken",
+        )
+
+    oidc.create_token = _bad_gateway
+    monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: oidc)
+    _cache_refreshable(issued_ago=2 * 3600, access_left=-10)
+
+    with pytest.raises(sso.SsoLoginError):
+        sso.login(START_URL, REGION)
+    assert cache.get(sso._token_cache_key(START_URL, REGION))
+
+
+def test_local_clear_finds_a_keychain_token_missing_from_the_index(monkeypatch):
+    kr = FakeKeyring()
+    monkeypatch.setattr(cache, "_keyring_module", lambda: kr)
+    key = sso._token_cache_key(START_URL, REGION)
+    kr.set_password(cache.KEYRING_SERVICE, key, json.dumps({"accessToken": "tok"}))
+
+    sso.index_sessions(((START_URL, REGION),))  # what `logout --local-only` does first
+    cache.clear()
+
+    assert kr.store == {}
+
+
+def test_network_error_during_refresh_keeps_the_session(monkeypatch):
+    from botocore.exceptions import EndpointConnectionError
+
+    oidc = RefreshingOidc()
+
+    def _offline(**kwargs):
+        raise EndpointConnectionError(endpoint_url="https://oidc.us-east-1.amazonaws.com")
+
+    oidc.create_token = _offline
+    monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: oidc)
+    _cache_refreshable(issued_ago=2 * 3600, access_left=-10)
+
+    with pytest.raises(sso.SsoLoginError):
+        sso.login(START_URL, REGION)
+    assert cache.get(sso._token_cache_key(START_URL, REGION))
+
+
+def test_logout_finds_a_keychain_token_missing_from_the_index(monkeypatch):
+    kr = FakeKeyring()
+    monkeypatch.setattr(cache, "_keyring_module", lambda: kr)
+    key = sso._token_cache_key(START_URL, REGION)
+    entry = {"accessToken": "tok", "expiresAt": time.time() + 3600, "region": REGION}
+    # Written under another SSOBROKER_HOME, so this home's index doesn't list it.
+    kr.set_password(cache.KEYRING_SERVICE, key, json.dumps(entry))
+    portal = type("P", (), {"logout": lambda self, accessToken: None})()
+    monkeypatch.setattr(sso.boto3, "client", lambda *a, **k: portal)
+
+    sso.logout(((START_URL, REGION),))
+
+    assert kr.store == {}
 
 
 def test_revoked_refresh_token_falls_back_to_sign_in(monkeypatch):

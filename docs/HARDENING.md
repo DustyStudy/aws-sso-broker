@@ -21,11 +21,14 @@ Each GitHub release has these files attached:
 | `runtime-requirements.txt` | Hash-locked runtime dependencies (including the `keyring` and `windows` extras) |
 | `aws-sso-broker.cdx.json` | CycloneDX SBOM of those dependencies |
 
-All four carry a signed build-provenance attestation. Check the wheel before
-you install it:
+All four carry a signed build-provenance attestation. Check the wheel and the
+requirements file before you install them. The hashes in
+`runtime-requirements.txt` are what pin every dependency, so a swapped file
+would install whatever packages it names:
 
 ```bash
 gh attestation verify aws_sso_broker-X.Y.Z-py3-none-any.whl --repo DustyStudy/aws-sso-broker
+gh attestation verify runtime-requirements.txt --repo DustyStudy/aws-sso-broker
 ```
 
 Install with every dependency pinned by hash:
@@ -182,7 +185,7 @@ for that region.
 
 ## 6. Checklist
 
-- [ ] Wheel verified with `gh attestation verify`
+- [ ] Wheel and `runtime-requirements.txt` verified with `gh attestation verify`
 - [ ] `policy.yaml` deployed, root/Administrators-only write, `ssobroker doctor` shows it
 - [ ] `ssobroker doctor --strict` passes on each machine: no long-lived keys in `~/.aws/credentials`, no AWS CLI SSO tokens left in `~/.aws/sso/cache`
 - [ ] `allowed_sso_start_urls` set
