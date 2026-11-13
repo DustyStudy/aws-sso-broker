@@ -11,6 +11,10 @@ venv/
 htmlcov/
 .mypy_cache/
 .ruff_cache/
+.hypothesis/
+# Dependencies are pinned in requirements/*.txt (hash-locked, Dependabot-updated);
+# a uv lock from local `uv` use would be a second, unmaintained source of truth.
+uv.lock
 
 # ssobroker runtime state — never commit cached tokens/credentials/audit logs
 .ssobroker/

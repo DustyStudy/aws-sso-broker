@@ -56,14 +56,17 @@ Every workflow under `.github/workflows/` follows the same baseline:
   `security-events: write` for SARIF uploads, `id-token: write` for
   Scorecard's Sigstore signing) scoped to only the specific job that needs
   it — never at the workflow level.
-- **`step-security/harden-runner`** as the first step of every job. It
-  monitors and can restrict network egress and file/process activity on
-  the runner, which is how real incidents like the `tj-actions/changed-files`
-  supply-chain compromise (CVE-2025-30066) get caught in practice. Currently
-  running in `audit` (log-only) mode while the egress allowlist is
-  characterized; the plan is to move to `block` mode with an explicit
-  allowlist once a few weeks of audit logs confirm nothing legitimate gets
-  blocked.
+- **`step-security/harden-runner`** as the first step of every job in this
+  repository's workflows that runs on Linux. It monitors and can restrict
+  network egress and file/process activity on the runner, which is how real
+  incidents like the `tj-actions/changed-files` supply-chain compromise
+  (CVE-2025-30066) get caught in practice. The Windows and macOS legs of
+  the CI test matrix skip it (`if: runner.os == 'Linux'` in `ci.yml`). The
+  release jobs (`release-please.yml`) run it in `block` mode
+  with an explicit egress allowlist; every other workflow runs it in `audit`
+  (log-only) mode for now, with the plan to move them to `block` once their
+  audit logs confirm nothing legitimate gets blocked. The shared security-scan
+  workflow is maintained in another repository and isn't covered here.
 - **`persist-credentials: false`** on every `actions/checkout` step, so the
   ephemeral `GITHUB_TOKEN` isn't left sitting in the local git config for
   the rest of the job.
