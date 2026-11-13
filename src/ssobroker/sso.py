@@ -28,6 +28,7 @@ import time
 import webbrowser
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, HTTPServer
+from typing import Any, Literal
 from urllib.parse import parse_qs, urlencode, urlparse
 
 import boto3
@@ -108,7 +109,7 @@ class SsoToken:
 _UNSIGNED = Config(signature_version=UNSIGNED)
 
 
-def _client(service: str, region: str):
+def _client(service: Literal["sso", "sso-oidc"], region: str) -> Any:
     return boto3.client(service, region_name=region, config=_UNSIGNED)
 
 

@@ -69,10 +69,12 @@ def _has_space(text: str) -> bool:
 def _short_path(path: str) -> str:
     """The 8.3 short form of a Windows path, or the path unchanged if the
     volume has short names turned off."""
+    if sys.platform != "win32":  # also tells mypy the rest is Windows-only
+        return path
     import ctypes
 
     buf = ctypes.create_unicode_buffer(32768)
-    n = ctypes.windll.kernel32.GetShortPathNameW(path, buf, len(buf))  # type: ignore[attr-defined]
+    n = ctypes.windll.kernel32.GetShortPathNameW(path, buf, len(buf))
     return buf.value if 0 < n < len(buf) else path
 
 
